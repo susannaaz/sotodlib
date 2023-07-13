@@ -9,12 +9,12 @@ from sklearn.ensemble import RandomForestClassifier
 import filter_stats_functions as func
 
 
-cols = ['Number of Detectors', 'Y and X Extent Ratio', 'Mean abs(Correlation)',
-        'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
-        'Within 0.1 of Y Hist Max/Number of Detectors', 'Dip Test for X Hist',
-        'P Value for Dip Test for X Hist','Dip Test for Y Hist',
-        'P Value for Dip Test for Y Hist', 'KS Test for X',
-        'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp']
+# cols = ['Number of Detectors', 'Y and X Extent Ratio', 'Mean abs(Correlation)',
+#         'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
+#         'Within 0.1 of Y Hist Max/Number of Detectors', 'Dip Test for X Hist',
+#         'P Value for Dip Test for X Hist','Dip Test for Y Hist',
+#         'P Value for Dip Test for Y Hist', 'KS Test for X',
+#         'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp']
 
 
 def compute_summary_stats(snippets):
