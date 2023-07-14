@@ -332,7 +332,7 @@ class GlitchClassification(_Preprocess):
         training_cols = self.process_cfgs.get("columns_for_training", ['Number of Detectors', 'Y and X Extent Ratio','Y Hist Max and Adjacent/Number of Detectors',
           'Within 0.1 of Y Hist Max/Number of Detectors', 'Mean abs(Correlation)', 'Mean abs(Time Lag)'])
 
-        df_stats.read_hdf('{}/{}.h5'.format(outdir, df_name))
+        df_stats = pd.read_hdf('{}/{}.h5'.format(outdir, df_name))
 
         df_w_predictions = tod_ops.glitch_classification.glitch_classification.classify_data_forest(df_stats, training_cols, trained_forest)
 
