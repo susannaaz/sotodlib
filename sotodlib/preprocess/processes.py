@@ -299,9 +299,12 @@ class GlitchComputeStats(_Preprocess):
     
     def process(self, aman, proc_aman):
         assert "snippets" in proc_aman
+        assert "snippet_layouts" in proc_aman
+
+        ##need to figure out a way to save snippet layout too
 
         #df_stats returns dataframe with summary statistics for glitch classification
-        df_stats = tod_ops.glitch_classification.glitch_classification.compute_summary_stats(snippets)
+        df_stats = tod_ops.glitch_classification.glitch_classification.compute_summary_stats(proc_aman.snippets)
 
         # HOW TO SAVE? temporary solution for now
 
