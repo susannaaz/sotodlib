@@ -69,6 +69,7 @@ def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False,
 
             info = {field: [alias, time, data]}
             fields_data.update(info)
+
         # this swaps the order bc i want it swapped after the config file scenario
         # but with aliases provided in the arg, i don't need it swapped
         grouped_feeds = _group_feeds(online_fields, alias_exists=True)
@@ -87,6 +88,30 @@ def _group_data(hkdata, field_dict=None, field_exists=False, alias_exists=False,
         grouped_data.append(device_data)
 
     return grouped_data
+
+def _check_hkdata(data):
+    """
+    A new bug was found in load_range() where if the same field name
+    is given n times, load_range() returns an empty array of data n 
+    times. This is written to catch that code and remove it from the
+    hkdata dictonary until this bug is fixed.
+    
+    Parameters:
+        data (dict) : dictionary of alias/fieldname, time, data from
+            load_range()
+
+    Returns:
+        hkdata (dict) : updated dictionary without the empty arrays
+
+    """
+    empty_keys = []
+    for alias in list(data):
+        if len(data[alias][0]) == 0:
+            empty_keys.append(alias)
+    
+    for key in empty_keys:
+        del data[key]
+
 
 def sort_hkdata_fromconfig(start, stop, config):
     """
@@ -123,6 +148,8 @@ def sort_hkdata_fromconfig(start, stop, config):
     # call load_range()
     logger.debug("running load_range()")
     hkdata = load_range(start, stop, config=config)
+    _check_hkdata(hkdata)
+
 
     # load all fields from config file
     with open(config, 'r') as file:
@@ -159,6 +186,7 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
     """
     if alias is None:
         hkdata = load_range(start, stop, fields, data_dir=data_dir)
+        _check_hkdata(hkdata)
         
         grouped_data = _group_data(hkdata, field_exists=True)
 
@@ -168,7 +196,8 @@ def sort_hkdata(start, stop, fields, data_dir, alias=None):
         # TODO: i think here, we need to have it output that field_dict
         # for grouping purposes, 
         hkdata = load_range(start, stop, fields, alias, data_dir)
-        
+        _check_hkdata(hkdata)
+
         # grouped data should also have a field_dict = field_dict argument 
         # which probably means i could combine this function with the sort hkdata from config function
         # to make it cleaner and easier to work with
@@ -230,7 +259,7 @@ def make_hkaman(grouped_data, alias_exists=False, det_cosampled=False, det_aman=
                 times_det.update(time_info)
 
                 device_data = group[field][2]
-
+                
                 info = {alias: device_data}
                 data.update(info)
             else:
