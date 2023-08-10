@@ -103,7 +103,7 @@ for missing in ('numpy', 'matplotlib', 'healpy', 'astropy','sqlalchemy',
                 'skyfield', 'h5py', 'pyfftw', 'scipy',
                 'toast', 'spt3g', 'so3g', 'pixell', 'scikit', 'skimage',
                 'traitlets', 'ephem', 'influxdb', 'pycpd', 'detmap', 'pandas', 
-                'sklearn', 'pickle'):
+                'sklearn', 'pickle', 'diptest'):
     try:
         foo = import_module(missing)
     except ImportError:
