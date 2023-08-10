@@ -10,21 +10,14 @@ from sklearn.ensemble import RandomForestClassifier
 from sotodlib.tod_ops import filter_stats_functions as func
 
 
-# cols = ['Number of Detectors', 'Y and X Extent Ratio', 'Mean abs(Correlation)',
-#         'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
-#         'Within 0.1 of Y Hist Max/Number of Detectors', 'Dip Test for X Hist',
-#         'P Value for Dip Test for X Hist','Dip Test for Y Hist',
-#         'P Value for Dip Test for Y Hist', 'KS Test for X',
-#         'Obs ID', 'Snippet', 'Start timestamp', 'Stop timestamp']
 
-
-def compute_summary_stats(snippets):
+def compute_summary_stats(snippets, cols_for_stats):
 
     '''
     Compute all of the summary statistics for glitch classification
 
     Input: snippets: snippets object/axis manager computed with 
-    sotodlib.tod_ops.glitch..extract_snippets
+    sotodlib.tod_ops.glitch.extract_snippets, cols_for_stats: list of columns of stats to compute
     Output: df: panadas dataframe with all of the summary statistics
     required for glitch classification
     ''' 
@@ -85,7 +78,7 @@ def compute_summary_stats(snippets):
             info[s, 9] = pval_y
 
 
-    df =  pd.DataFrame(info, columns = cols)
+    df =  pd.DataFrame(info, columns = cols_for_stats)
 
 
     df['Obs ID'] = snippets[0].obs_info.obs_id
@@ -131,13 +124,13 @@ def training_forest(df_train, cols, n_trees = 50, max_depth = 15):
     return forest
 
 
-def classify_data_forest(df_classify, cols, trained_forest):
+def classify_data_forest(df_classify, classifying_cols, trained_forest):
 
     '''
     Classify glitches using a random forest.
 
     Input: df_classify: panadas data frame of data to classify,
-    cols: list of columns of stats to use for classification (must match cols used for training),
+    classifying_cols: list of columns of stats to use for classification (must match cols used for training),
     trained_forest: trained random forest
     Output: df_w_labs_and_stats: returns the dataframe with a column for the predicted labels - int from 
     0 - 3 corresponding to 0: Point Sources, 1: Point Sources + Other 2: Cosmic Rays, 3: Other also columns 
@@ -146,7 +139,7 @@ def classify_data_forest(df_classify, cols, trained_forest):
 
     col_predictions = ['Glitch Prediction', 'Probability of being a Point Source', 'Probability of being a Point Source + Other', 'Probability of being a Cosmic Ray', 'Probability of being an Other']
 
-    X_classify = df_classify[cols]
+    X_classify = df_classify[classifying_cols]
 
     y_pred_forest = trained_forest.predict(X_classify)
 

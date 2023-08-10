@@ -7,6 +7,7 @@ import pickle as pk
 import sotodlib.core as core
 import sotodlib.flags as flags
 import sotodlib.tod_ops as tod_ops
+from sotodlib.tod_ops import glitch_classification
 from sotodlib.hwp import hwp
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
@@ -298,13 +299,17 @@ class GlitchComputeStats(_Preprocess):
     name = "glitch_compute_stats"
     
     def process(self, aman, proc_aman):
-        assert "snippets" in proc_aman
-        assert "snippet_layouts" in proc_aman
+
+        cols_for_stats = self.process_cfgs.get("cols_for_stats",['Number of Detectors', 'Y and X Extent Ratio', 
+        'Mean abs(Correlation)', 'Mean abs(Time Lag)', 'Y Hist Max and Adjacent/Number of Detectors',
+        'Within 0.1 of Y Hist Max/Number of Detectors', 'Dip Test for X Hist', 'P Value for Dip Test for X Hist',
+        'Dip Test for Y Hist', 'P Value for Dip Test for Y Hist', 'KS Test for X', 'Obs ID',
+        'Snippet', 'Start timestamp', 'Stop timestamp'])
 
         ##need to figure out a way to save snippet layout too
 
         #df_stats returns dataframe with summary statistics for glitch classification
-        df_stats = tod_ops.glitch_classification.glitch_classification.compute_summary_stats(proc_aman.snippets)
+        df_stats = glitch_classification.compute_summary_stats(proc_aman.snippets, cols_for_stats)
 
         # HOW TO SAVE? temporary solution for now
 
@@ -330,16 +335,18 @@ class GlitchClassification(_Preprocess):
 
         trained_forest_name = self.process_cfgs.get("trained_forest_name", "trained_forest")
 
-        trained_forest = pk.load(open('{}/{}.pkl'.format(outdir, trained_forest_name, 'rb')))
+        trained_forest = pk.load(open('{}/{}.pkl'.format(outdir, trained_forest_name), 'rb'))
 
-        training_cols = self.process_cfgs.get("columns_for_training", ['Number of Detectors', 'Y and X Extent Ratio','Y Hist Max and Adjacent/Number of Detectors',
+        classifying_cols = self.process_cfgs.get("columns_for_classifying", ['Number of Detectors', 'Y and X Extent Ratio','Y Hist Max and Adjacent/Number of Detectors',
           'Within 0.1 of Y Hist Max/Number of Detectors', 'Mean abs(Correlation)', 'Mean abs(Time Lag)'])
 
-        df_stats = pd.read_hdf('{}/{}.h5'.format(outdir, df_name))
+        df_stats_t = pd.read_hdf('{}/{}.h5'.format(outdir, df_name))
 
-        df_w_predictions = tod_ops.glitch_classification.glitch_classification.classify_data_forest(df_stats, training_cols, trained_forest)
+        df_stats = df_stats_t.dropna()
 
-        df_w_predictions.to_hdf('{}/{}_w_predictions.h5'.format(outdir, df_name), key='df', mode='a')        
+        df_w_predictions = glitch_classification.classify_data_forest(df_stats, classifying_cols, trained_forest)
+
+        df_w_predictions.to_hdf('{}/{}_w_predictions.h5'.format(outdir, df_name), key='df', mode='w')        
 
 _Preprocess.register(Trends.name, Trends)
 _Preprocess.register(FFTTrim.name, FFTTrim)
