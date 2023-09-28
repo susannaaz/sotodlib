@@ -94,7 +94,11 @@ def load_data(job, args, toast_comm):
         ops.mem_count.prefix = "Before HDF5 data load"
         ops.mem_count.apply(data)
 
-        log.info_rank(f"Loading {ops.in_hdf5.files}", comm=toast_comm.comm_world)
+        if len(ops.in_hdf5.files) != 0:
+            files = ops.in_hdf5.files
+        else:
+            files = ops.in_hdf5.volume
+        log.info_rank(f"Loading {files}", comm=toast_comm.comm_world)
         ops.in_hdf5.apply(data)
 
         log.info_rank("Loaded HDF5 data in", comm=toast_comm.comm_world, timer=timer)
@@ -209,10 +213,8 @@ def main():
 
     # We enforce only one process group for this job
     group_size = comm.size
-    if jobargs.group_size != group_size:
-        raise RuntimeError(
-            "This conversion script only works with a single process group"
-        )
+    if jobargs.group_size is not None and jobargs.group_size != group_size:
+        raise RuntimeError("This conversion script only works with a single process group.")
 
     # Create the toast communicator
     toast_comm = toast.Comm(world=comm, groupsize=group_size)
