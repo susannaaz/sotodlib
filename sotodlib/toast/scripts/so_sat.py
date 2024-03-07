@@ -211,7 +211,7 @@ def main():
     wrk.setup_simulate_observing(parser, operators)
 
     # Setup splits
-    wrk.setup_splits(parser, operators)
+    wrk.setup_splits(operators)
 
     wrk.setup_pointing(operators)
     wrk.setup_az_intervals(operators)
