@@ -70,6 +70,12 @@ def simulate_data(job, otherargs, runargs, comm):
 
     wrk.select_pointing(job, otherargs, runargs, data)
     wrk.simple_noise_models(job, otherargs, runargs, data)
+
+    # If we are not simulating observing or zero-ing out loaded data,
+    # then we don't need to do anything else here
+    if not job_ops.sim_ground.enabled and not otherargs.zero_loaded_data:
+        return
+
     wrk.simulate_atmosphere_signal(job, otherargs, runargs, data)
 
     # Shortcut if we are only caching the atmosphere.  If this job is only caching
