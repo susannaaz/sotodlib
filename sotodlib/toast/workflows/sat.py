@@ -43,4 +43,5 @@ def splits(job, otherargs, runargs, data):
     job_ops = job.operators
 
     if job_ops.splits.enabled:
+        job_ops.splits.output_dir = otherargs.out_dir
         job_ops.splits.apply(data)
