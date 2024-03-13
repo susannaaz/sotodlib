@@ -123,7 +123,7 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 cuts=None, threads=None, det_weights=None, interpol=None):
+                 cuts=None, threads=None, det_weights=None, interpol=None, pixRangeMaxes=None):
         self.sight = sight
         self.fp = fp
         self.geom = wrap_geom(geom)
@@ -133,13 +133,14 @@ class P:
         self.active_tiles = None
         self.det_weights = det_weights
         self.interpol = interpol
+        self.pixRangeMaxes = pixRangeMaxes
 
     @classmethod
     def for_tod(cls, tod, sight=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
                 boresight_equ=None, wcs_kernel=None, weather='typical',
-                site='so', interpol=None, hwp=False):
+                site='so', interpol=None, hwp=False, pixRangeMaxes=None):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -199,7 +200,7 @@ class P:
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
                    cuts=cuts, threads=threads, det_weights=det_weights,
-                   interpol=interpol)
+                   interpol=interpol, pixRangeMaxes=pixRangeMaxes)
 
     @classmethod
     def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
@@ -424,6 +425,10 @@ class P:
             raise ValueError("Can't project without a geometry!")
         # Backwards compatibility for old so3g
         interpol_kw = _get_interpol_args(self.interpol)
+        if self.geom.wcs.wcs.ctype[0] == 'HPX':
+            if self.pixRangeMaxes is None:
+                self.pixRangeMaxes = [0, int(self.geom.shape[1])]
+            return so3g.proj.Projectionist.for_healpix(self.geom.shape, self.pixRangeMaxes, **interpol_kw)
         if self.tiled:
             return so3g.proj.Projectionist.for_tiled(
                 self.geom.shape, self.geom.wcs, self.geom.tile_shape,
