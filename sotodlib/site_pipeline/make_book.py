@@ -12,13 +12,13 @@ def make_lock(fname):
     with open(fname, 'w') as f:
         f.write(str(dt.datetime.now().timestamp()))
 
-def check_lock(fname):
+def check_lock(fname, timeout):
     if not os.path.exists(fname):
         return True
     with open(fname, 'r') as f:
         t = float(f.readline())
-    if dt.datetime.now().timestamp() > t + 6*3600:
-        raise ValueError(f"lockfile {fname} is over 6 hours old")
+    if dt.datetime.now().timestamp() > t + timeout*3600:
+        raise ValueError(f"lockfile {fname} is over {timeout} hours old")
     return False
 
 def remove_lock(fname):
@@ -44,7 +44,7 @@ def main(config: str):
     l = ".make_book." + f.replace(".yaml", ".lock")
     lockname = os.path.join(b,l)
 
-    if not check_lock(lockname):
+    if not check_lock(lockname, 6):
         imprinter.logger.warning("Not running make_book because of lockfile")
         return
     make_lock(lockname)
