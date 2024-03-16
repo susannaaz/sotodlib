@@ -10,6 +10,7 @@ def make_lock(fname):
         raise ValueError(f"Tried to make lockfile {fname} which already"
                           " exists")
     with open(fname, 'w') as f:
+        print("writing lock file {fname}")
         f.write(str(dt.datetime.now().timestamp()))
 
 def check_lock(fname, timeout):
@@ -24,6 +25,7 @@ def check_lock(fname, timeout):
 def remove_lock(fname):
     if not os.path.exists(fname):
         raise ValueError(f"lockfile {fname} does not exist at removal?")
+    print("removing lock file {fname}")
     os.remove(fname)
 
 def main(config: str):
