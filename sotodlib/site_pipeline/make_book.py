@@ -10,7 +10,7 @@ def make_lock(fname):
         raise ValueError(f"Tried to make lockfile {fname} which already"
                           " exists")
     with open(fname, 'w') as f:
-        print("writing lock file {fname}")
+        print(f"writing lock file {fname}")
         f.write(str(dt.datetime.now().timestamp()))
 
 def check_lock(fname, timeout):
