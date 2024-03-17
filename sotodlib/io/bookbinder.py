@@ -630,13 +630,16 @@ class BookBinder:
         self.ignore_tags = ignore_tags
 
         if os.path.exists(outdir):
-            if len(os.path.listdir(outdir)) > 1:
+            if len(os.listdir(outdir)) > 1:
                 raise ValueError(
                     f"Output directory {outdir} contains files. Delete to retry"
                       " bookbinding"
                 )
-            elif len(os.path.listdir(outdir)) == 1:
-                assert len(os.path.listdir(outdir))[0] == 'Z_bookbinder_log.txt'
+            elif len(os.listdir(outdir)) == 1:
+                assert (os.listdir(outdir)[0] == 'Z_bookbinder_log.txt', 
+                    f"only acceptable file in new book path {outdir} is "
+                    " Z_bookbinder_log.txt"
+                )
         else:
             os.makedirs(outdir)
 
