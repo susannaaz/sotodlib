@@ -54,6 +54,10 @@ class BookExistsError(Exception):
 
     pass
 
+class BookPathError(Exception):
+    """Exception raised when a book path exists before binding"""
+
+    pass
 
 class BookBoundError(Exception):
     """Exception raised when a book is already bound"""
@@ -754,7 +758,8 @@ class Imprinter:
                 ancil_drop_duplicates=ancil_drop_duplicates,
             )
             book.path = op.abspath(binder.outdir)
-
+            if os.path.exists(book.path):
+                raise BookPathError(f"Book Path {book.path} alreay exists")
             binder.bind(pbar=pbar)
 
             # write M_book file
