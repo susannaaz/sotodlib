@@ -629,7 +629,15 @@ class BookBinder:
         self.max_file_size = max_file_size
         self.ignore_tags = ignore_tags
 
-        if not os.path.exists(outdir):
+        if os.path.exists(outdir):
+            if len(os.path.listdir(outdir)) > 1:
+                raise ValueError(
+                    f"Output directory {outdir} contains files. Delete to retry"
+                      " bookbinding"
+                )
+            elif len(os.path.listdir(outdir)) == 1:
+                assert len(os.path.listdir(outdir))[0] == 'Z_bookbinder_log.txt'
+        else:
             os.makedirs(outdir)
 
         logfile = os.path.join(outdir, 'Z_bookbinder_log.txt')

@@ -25,7 +25,7 @@ def check_lock(fname, timeout):
 def remove_lock(fname):
     if not os.path.exists(fname):
         raise ValueError(f"lockfile {fname} does not exist at removal?")
-    print("removing lock file {fname}")
+    print(f"removing lock file {fname}")
     os.remove(fname)
 
 def main(config: str):
@@ -51,12 +51,13 @@ def main(config: str):
         return
     make_lock(lockname)
 
+
     # get unbound books
     unbound_books = imprinter.get_unbound_books()
     already_failed_books = imprinter.get_failed_books()
     
     print(f"Found {len(unbound_books)} unbound books and "
-          f"{len(already_failed_books)} failed books")
+        f"{len(already_failed_books)} failed books")
     for book in unbound_books:
         print(f"Binding book {book.bid}")
         try:
@@ -79,6 +80,7 @@ def main(config: str):
             print(traceback.format_exc())
             # it has failed twice, ideally we want people to look at it now
             # do something here
+
     remove_lock(lockname)
 
 
