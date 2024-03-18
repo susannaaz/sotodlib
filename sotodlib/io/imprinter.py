@@ -751,6 +751,7 @@ class Imprinter:
                 ignore_tags=ignore_tags,
                 ancil_drop_duplicates=ancil_drop_duplicates,
             )
+            book.path = op.abspath(binder.outdir)
             binder.bind(pbar=pbar)
 
             # write M_book file
@@ -775,6 +776,7 @@ class Imprinter:
                 tc = self.tube_configs[book.tel_tube]
             else:
                 tc = {}
+            
             mfile = os.path.join(binder.outdir, "M_index.yaml")
             with open(mfile, "w") as f:
                 yaml.dump(
