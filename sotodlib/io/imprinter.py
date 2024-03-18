@@ -581,8 +581,6 @@ class Imprinter:
             session_id = book.bid.split("_")[1]
             first5 = session_id[:5]
             odir = op.join(self.output_root, book.tel_tube, book.type, first5)
-            if not op.exists(odir):
-                os.makedirs(odir)
             return os.path.join(odir, book.bid)
         elif book.type in ["hk", "smurf"]:
             # get source directory for hk book
@@ -613,7 +611,7 @@ class Imprinter:
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
-            book_path = get_book_path(book)
+            book_path = self.get_book_path(book)
 
             # after sanity checks, now we proceed to bind the book.
             # get files associated with this book, in the form of
