@@ -50,38 +50,45 @@ import pixell.fft
 pixell.fft.engine = "fftw"
 
 
-def simulate_data(job, otherargs, runargs, comm):
+def load_observations(job, otherargs, runargs, comm):
+    """Load or simulate data.
+    """
     log = toast.utils.Logger.get()
     job_ops = job.operators
 
     if job_ops.sim_ground.enabled:
+        # We are simulating an observing schedule, not just replacing data
         data = wrk.simulate_observing(job, otherargs, runargs, comm)
+        wrk.simple_noise_models(job, otherargs, runargs, data)
     else:
         group_size = wrk.reduction_group_size(job, runargs, comm)
         toast_comm = toast.Comm(world=comm, groupsize=group_size)
         data = toast.Data(comm=toast_comm)
-        # Load data from all formats
+
+        # Load data from any format
         wrk.load_data_hdf5(job, otherargs, runargs, data)
         wrk.load_data_context(job, otherargs, runargs, data)
         wrk.create_az_intervals(job, otherargs, runargs, data)
+
+        # FIXME: estimate simple high-frequency noise model
+        # here from sample differences.
+
         # optionally zero out
         if otherargs.zero_loaded_data:
             toast.ops.Reset(detdata=[defaults.signal])
-
     wrk.select_pointing(job, otherargs, runargs, data)
-    wrk.simple_noise_models(job, otherargs, runargs, data)
+    return data
 
-    # If we are not simulating observing or zero-ing out loaded data,
-    # then we don't need to do anything else here
-    if not job_ops.sim_ground.enabled and not otherargs.zero_loaded_data:
-        return
+def simulate_data(job, otherargs, runargs, data):
+    log = toast.utils.Logger.get()
+    job_ops = job.operators
 
     wrk.simulate_atmosphere_signal(job, otherargs, runargs, data)
 
     # Shortcut if we are only caching the atmosphere.  If this job is only caching
     # (not observing) the atmosphere, then return at this point.
     if job.operators.sim_atmosphere.cache_only:
-        return data
+        return
 
     wrk.simulate_sky_map_signal(job, otherargs, runargs, data)
     wrk.simulate_conviqt_signal(job, otherargs, runargs, data)
@@ -106,8 +113,6 @@ def simulate_data(job, otherargs, runargs, comm):
 
     mem = toast.utils.memreport(msg="(whole node)", comm=comm, silent=True)
     log.info_rank(f"After saving data:  {mem}", comm)
-
-    return data
 
 
 def reduce_data(job, otherargs, runargs, data):
@@ -276,7 +281,14 @@ def main():
         log.info_rank("Dry-run complete", comm=comm)
         return
 
-    data = simulate_data(job, otherargs, runargs, comm)
+    # Load or simulate the observing
+    data = load_observations(job, otherargs, runargs, comm)
+
+    # Simulate detector data, if needed.
+    # If we are not simulating observing or zero-ing out loaded data,
+    # then we are just working with real data and can skip this.
+    if job.operators.sim_ground.enabled or otherargs.zero_loaded_data:
+        simulate_data(job, otherargs, runargs, data)
 
     if not job.operators.sim_atmosphere.cache_only:
         # Reduce the data
