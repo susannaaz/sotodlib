@@ -342,12 +342,29 @@ class LoadContext(Operator):
             # Create the observation.  We intentionally use the generic focalplane
             # and class here, in case we are loading data from legacy experiments.
 
-            # Convert any focalplane quaternion offsets to toast format
+            # Convert any focalplane quaternion offsets to toast format.  We also
+            # look for any detectors with NaN values and flag those with the
+            # processing bit.
 
             name_col = Column(name="name", data=det_props["det_info_readout_id"])
             det_props.add_column(name_col, index=0)
 
+            fp_flags = dict()
             if "focal_plane_xi" in det_props.colnames:
+                fp_bad = np.logical_or(
+                    np.isnan(det_props["focal_plane_xi"]),
+                    np.logical_or(
+                        np.isnan(det_props["focal_plane_eta"]),
+                        np.isnan(det_props["focal_plane_gamma"]),
+                    ),
+                )
+                fp_flags = {
+                    x: defaults.det_mask_processing
+                    for x, y in zip(det_props["name"], fp_bad) if y
+                }
+                det_props["focal_plane_xi"][fp_bad] = 0
+                det_props["focal_plane_eta"][fp_bad] = 0
+                det_props["focal_plane_gamma"][fp_bad] = 0
                 quat_data = toast.instrument_coords.xieta_to_quat(
                     det_props["focal_plane_xi"],
                     det_props["focal_plane_eta"],
@@ -396,6 +413,9 @@ class LoadContext(Operator):
                 sample_sets=None,
                 process_rows=comm.group_size,
             )
+
+            # Apply detector flags for bad pointing reconstruction
+            ob.update_local_detector_flags(fp_flags)
 
             # Create observation fields
             ob.shared.create_column(
@@ -498,11 +518,27 @@ class LoadContext(Operator):
                 # boresight angles.
                 bore_azel = None
                 bore_radec = None
+                bore_flags = None
                 if ob.comm_col_rank == 0:
+                    bore_bad = np.logical_or(
+                        np.isnan(ob.shared[self.azimuth].data),
+                        np.logical_or(
+                            np.isnan(ob.shared[self.elevation].data),
+                            np.isnan(ob.shared[self.roll].data),
+                        ),
+                    )
+                    bore_flags = np.array(ob.shared[self.shared_flags].data)
+                    bore_flags[bore_bad] |= defaults.shared_mask_processing
+                    temp_az = np.array(ob.shared[self.azimuth].data)
+                    temp_el = np.array(ob.shared[self.elevation].data)
+                    temp_roll = np.array(ob.shared[self.roll].data)
+                    temp_az[bore_bad] = 0
+                    temp_el[bore_bad] = 0
+                    temp_roll[bore_bad] = 0
                     bore_azel = toast.qarray.from_lonlat_angles(
-                        -ob.shared[self.azimuth].data,
-                        ob.shared[self.elevation].data,
-                        ob.shared[self.roll].data,
+                        -temp_az,
+                        temp_el,
+                        temp_roll,
                     )
                     bore_radec = toast.coordinates.azel_to_radec(
                         site,
@@ -510,6 +546,7 @@ class LoadContext(Operator):
                         bore_azel,
                         use_qpoint=True,
                     )
+                ob.shared[self.shared_flags].set(bore_flags, offset=(0, 0), fromrank=0)
                 ob.shared[self.boresight_azel].set(bore_azel, offset=(0, 0), fromrank=0)
                 ob.shared[self.boresight_radec].set(bore_radec, offset=(0, 0), fromrank=0)
             data.obs.append(ob)
