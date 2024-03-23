@@ -337,6 +337,7 @@ class LoadContext(Operator):
 
                 # Construct table
                 det_props = QTable(fp_cols)
+                del axtemp
 
             log.info_rank(
                 f"LoadContext {obs_name} metadata loaded in",
@@ -701,6 +702,8 @@ class LoadContext(Operator):
                                 dtype=axman[key].dtype,
                                 units=u.dimensionless_unscaled,
                             )
+                            for idet, det in enumerate(obs.local_detectors):
+                                obs.detdata[data_key][idet] = axman[key][idet]
                     else:
                         # Must be some other type of object...
                         if data_key not in om:
@@ -722,7 +725,6 @@ class LoadContext(Operator):
                             axbuf = axman[key]
                         obs.shared[shared_ax_to_obs[data_key]].set(
                             axbuf,
-                            offset=(0,),
                             fromrank=0,
                         )
                     elif data_key in shared_flag_fields:
@@ -737,7 +739,6 @@ class LoadContext(Operator):
                             axbuf |= temp
                         obs.shared[self.shared_flags].set(
                             axbuf,
-                            offset=(0,),
                             fromrank=0,
                         )
                     else:
