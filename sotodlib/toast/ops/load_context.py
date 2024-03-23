@@ -283,6 +283,10 @@ class LoadContext(Operator):
         if comm.comm_world is not None:
             obs_props = comm.comm_world.bcast(obs_props, root=0)
 
+        log.info_rank(
+            "LoadContext parsed observation sizes in", comm=comm.comm_world, timer=timer
+        )
+
         if len(obs_props) == 0:
             msg = "No observation IDs specified or matched the regex"
             raise RuntimeError(msg)
@@ -298,6 +302,8 @@ class LoadContext(Operator):
         # Every group loads its observations
         for obindx in range(group_firstobs, group_firstobs + group_numobs):
             obs_name = obs_props[obindx]["name"]
+            otimer = Timer()
+            otimer.start()
 
             # One process in the group loads the metadata, builds the focalplane
             # model, and broadcasts to the rest of the group.
@@ -332,11 +338,24 @@ class LoadContext(Operator):
                 # Construct table
                 det_props = QTable(fp_cols)
 
+            log.info_rank(
+                f"LoadContext {obs_name} metadata loaded in",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
+
             if comm.comm_group is not None:
                 obs_meta = comm.comm_group.bcast(obs_meta, root=0)
                 det_props = comm.comm_group.bcast(det_props, root=0)
                 n_samp = comm.comm_group.bcast(n_samp, root=0)
                 rate = comm.comm_group.bcast(rate, root=0)
+
+            log.info_rank(
+                f"LoadContext {obs_name} metadata bcast took",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
+
             rate = u.Quantity(rate, u.Hz)
 
             # Create the observation.  We intentionally use the generic focalplane
@@ -412,6 +431,12 @@ class LoadContext(Operator):
                 detector_sets=detsets,
                 sample_sets=None,
                 process_rows=comm.group_size,
+            )
+
+            log.info_rank(
+                f"LoadContext {obs_name} construct Observation in",
+                comm=comm.comm_group,
+                timer=otimer,
             )
 
             # Apply detector flags for bad pointing reconstruction
@@ -502,9 +527,28 @@ class LoadContext(Operator):
                 )
                 ob.detdata.create(self.det_flags, dtype=np.uint8)
 
+            log.info_rank(
+                f"LoadContext {obs_name} allocated TOD in",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
+
             # Now every process loads its data
             axtod = self.context.get_obs(obs_name, dets=ob.local_detectors)
+
+            log.info_rank(
+                f"LoadContext {obs_name} AxisManager loaded in",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
+
             self._parse_data(ob, have_pointing, axtod, None)
+
+            log.info_rank(
+                f"LoadContext {obs_name} AxisManager to Observation conversion took",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
 
             # Position and velocity of the observatory are simply computed.  Only the
             # first row of the process grid needs to do this.
@@ -548,9 +592,16 @@ class LoadContext(Operator):
                         bore_azel,
                         use_qpoint=True,
                     )
-                ob.shared[self.shared_flags].set(bore_flags, offset=(0, 0), fromrank=0)
+                ob.shared[self.shared_flags].set(bore_flags, offset=(0,), fromrank=0)
                 ob.shared[self.boresight_azel].set(bore_azel, offset=(0, 0), fromrank=0)
                 ob.shared[self.boresight_radec].set(bore_radec, offset=(0, 0), fromrank=0)
+
+            log.info_rank(
+                f"LoadContext {obs_name} boresight pointing conversion took",
+                comm=comm.comm_group,
+                timer=otimer,
+            )
+
             data.obs.append(ob)
 
     def _parse_data(self, obs, have_pointing, axman, base):
