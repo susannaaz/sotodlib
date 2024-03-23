@@ -415,7 +415,9 @@ class LoadContext(Operator):
             )
 
             # Apply detector flags for bad pointing reconstruction
-            ob.update_local_detector_flags(fp_flags)
+            local_dets = set(ob.local_detectors)
+            local_fp_flags = {x: y for x, y in fp_flags.items() if x in local_dets}
+            ob.update_local_detector_flags(local_fp_flags)
 
             # Create observation fields
             ob.shared.create_column(
