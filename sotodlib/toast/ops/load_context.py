@@ -743,6 +743,10 @@ class LoadContext(Operator):
                         )
                     else:
                         # This is some other shared data.
+                        # FIXME: we skip this for now.  If we want to re-enable,
+                        # we should pre-create this shared data or debug a
+                        # deadlock that occurs when running the code as it is.
+                        continue
                         obs.shared.create_column(
                             data_key,
                             shape=axman[key].shape,
