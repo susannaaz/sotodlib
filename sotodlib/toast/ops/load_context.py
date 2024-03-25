@@ -4,6 +4,7 @@
 import os
 import re
 import datetime
+import yaml
 
 import numpy as np
 import traitlets
@@ -22,6 +23,7 @@ import so3g
 
 from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
+from ...preprocess import Pipeline as PreProcPipe
 
 from ..instrument import SOFocalplane, SOSite
 
@@ -77,6 +79,12 @@ class LoadContext(Operator):
         None,
         allow_none=True,
         help="Text file containing observation IDs to load",
+    )
+
+    preprocess_config = Unicode(
+        None,
+        allow_none=True,
+        help="Apply pre-processing with this configuration",
     )
 
     observations = List(list(), help="List of observation IDs to load")
@@ -261,9 +269,13 @@ class LoadContext(Operator):
             self.observations = olist
 
         obs_props = None
+        preproc_conf = None
         if comm.world_rank == 0:
             obs_props = list()
             obs_list = self.observations
+            if self.preprocess_config is not None:
+                with open(self.preprocess_config, "r") as f:
+                    preproc_conf = yaml.safe_load(f)
             if self.observation_regex is not None:
                 # Match against the full list of observation IDs
                 obs_list = []
@@ -282,6 +294,8 @@ class LoadContext(Operator):
 
         if comm.comm_world is not None:
             obs_props = comm.comm_world.bcast(obs_props, root=0)
+            if self.preprocess_config is not None:
+                preproc_conf = comm.comm_world.bcast(preproc_conf, root=0)
 
         log.info_rank(
             "LoadContext parsed observation sizes in", comm=comm.comm_world, timer=timer
@@ -312,8 +326,21 @@ class LoadContext(Operator):
             obs_meta = None
             n_samp = None
             rate = None
+            meta = None
             if comm.group_rank == 0:
+                # Load metadata
                 meta = self.context.get_meta(obs_name, dets=det_select)
+
+                if self.preprocess_config is not None:
+                    # Cut detectors with preprocessing
+                    prepipe = PreProcPipe(
+                        preproc_conf["process_pipe"],
+                        logger=log,
+                    )
+                    for process in prepipe:
+                        log.debug(f"Preprocess selecting on {process.name}")
+                        process.select(meta)
+
                 # Read telescope data to get number of samples
                 axtemp = self.context.get_obs(obs_name, no_signal=True)
                 n_samp = len(axtemp[self.ax_times])
@@ -350,6 +377,7 @@ class LoadContext(Operator):
                 det_props = comm.comm_group.bcast(det_props, root=0)
                 n_samp = comm.comm_group.bcast(n_samp, root=0)
                 rate = comm.comm_group.bcast(rate, root=0)
+                meta = comm.comm_group.bcast(meta, root=0)
 
             log.info_rank(
                 f"LoadContext {obs_name} metadata bcast took",
@@ -535,7 +563,14 @@ class LoadContext(Operator):
             )
 
             # Now every process loads its data
-            axtod = self.context.get_obs(obs_name, dets=ob.local_detectors)
+            axtod = self.context.get_obs(meta)
+
+            # Apply preprocessing.  The preprocessing inputs / metadata should have
+            # already been loaded from the context.  Now we apply that preprocessing
+            # to the local detectors.
+            if self.preprocess_config is not None:
+                prepipe = PreProcPipe(preproc_conf["process_pipe"], logger=log)
+                prepipe.run(axtod, axtod.preprocess)
 
             log.info_rank(
                 f"LoadContext {obs_name} AxisManager loaded in",
@@ -544,6 +579,10 @@ class LoadContext(Operator):
             )
 
             self._parse_data(ob, have_pointing, axtod, None)
+
+            # No longer needed
+            del axtod
+            del meta
 
             log.info_rank(
                 f"LoadContext {obs_name} AxisManager to Observation conversion took",
