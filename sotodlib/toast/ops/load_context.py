@@ -326,7 +326,6 @@ class LoadContext(Operator):
             obs_meta = None
             n_samp = None
             rate = None
-            meta = None
             if comm.group_rank == 0:
                 # Load metadata
                 meta = self.context.get_meta(obs_name, dets=det_select)
@@ -365,6 +364,7 @@ class LoadContext(Operator):
                 # Construct table
                 det_props = QTable(fp_cols)
                 del axtemp
+                del meta
 
             log.info_rank(
                 f"LoadContext {obs_name} metadata loaded in",
@@ -377,7 +377,6 @@ class LoadContext(Operator):
                 det_props = comm.comm_group.bcast(det_props, root=0)
                 n_samp = comm.comm_group.bcast(n_samp, root=0)
                 rate = comm.comm_group.bcast(rate, root=0)
-                meta = comm.comm_group.bcast(meta, root=0)
 
             log.info_rank(
                 f"LoadContext {obs_name} metadata bcast took",
@@ -563,7 +562,7 @@ class LoadContext(Operator):
             )
 
             # Now every process loads its data
-            axtod = self.context.get_obs(meta)
+            axtod = self.context.get_obs(obs_name, dets=ob.local_detectors)
 
             # Apply preprocessing.  The preprocessing inputs / metadata should have
             # already been loaded from the context.  Now we apply that preprocessing
@@ -582,7 +581,6 @@ class LoadContext(Operator):
 
             # No longer needed
             del axtod
-            del meta
 
             log.info_rank(
                 f"LoadContext {obs_name} AxisManager to Observation conversion took",
