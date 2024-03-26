@@ -27,6 +27,7 @@ from .load_smurf import (
     SupRsyncType,
     Files,
 )
+from .datapkg_utils import load_configs
 from .check_book import BookScanner
 from .g3thk_db import G3tHk, HKFiles
 from ..site_pipeline.util import init_logger
@@ -218,8 +219,7 @@ class Imprinter:
         """
 
         # load config file and parameters
-        with open(im_config, "r") as f:
-            self.config = yaml.safe_load(f)
+        self.config = load_configs(im_config)
 
         self.db_path = self.config.get("db_path")
         self.daq_node = self.config.get("daq_node")
@@ -1749,8 +1749,7 @@ def create_g3tsmurf_session(config):
 
     """
     # create database connection
-    with open(config, "r") as f:
-        config = yaml.safe_load(f)
+    config = load_configs(config)
     config["db_args"] = {"connect_args": {"check_same_thread": False}}
     SMURF = G3tSmurf.from_configs(config)
     session = SMURF.Session()
