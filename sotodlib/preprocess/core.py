@@ -418,3 +418,74 @@ class Pipeline(list):
         
         return full, success
         
+
+class _FracFlaggedMixIn(object):
+
+    # key to access the flags dataset
+    # either a tuple: (name, flags_key)
+    # or a string: flags_key, in which case the name will be taken from the class attribute
+    _flags_key = None
+    _percentiles = [0, 50, 75, 90, 95, 100]
+
+    @classmethod
+    def gen_metric(cls, meta, proc_aman):
+        """ Generate a QA metric from the output of this process.
+
+        Arguments
+        ---------
+        meta : AxisManager
+            The full metadata container.
+        proc_aman : AxisManager
+            The metadata containing just the output of this process.
+
+        Returns
+        -------
+        line : dict
+            InfluxDB line entry elements to be fed to
+            `site_pipeline.monitor.Monitor.record`
+        """
+        if isinstance(cls._flags_key, tuple):
+            key1, key2 = cls._flags_key
+        else:
+            key1, key2 = cls.name, cls._flags_key
+
+        # record one metric per detset
+        # extract these tags for the metric
+        tag_keys = ["detset", "wafer_slot", "tel_tube", "bandpass"]
+        tags = []
+        vals = []
+        for ds in np.unique(meta.det_info.detset):
+            subset = np.where(meta.det_info.detset == ds)[0]
+
+            # Compute the number of samples that were flagged
+            frac_flagged = np.array([
+                np.dot(r.ranges(), [-1, 1]).sum() / meta.obs_info.n_samples
+                for r in proc_aman[key1][key2][subset]
+            ])
+
+            # record percentiles over detectors and fraction of samples flagged
+            perc = np.percentile(frac_flagged, cls._percentiles)
+            mean = frac_flagged.mean()
+
+            # get the tags for this wafer (all detectors in this subset share these)
+            tags_base = {k: meta.det_info[k][subset[0]] for k in tag_keys if k in meta.det_info}
+            tags_base["telescope"] = meta.obs_info.telescope
+
+            # add tags and values to respective lists in order
+            tags_perc = [tags_base.copy() for i in range(perc.size)]
+            for i, t in enumerate(tags_perc):
+                t["det_stat"] = f"percentile_{cls._percentiles[i]}"
+            vals += list(perc)
+            tags += tags_perc
+            tags_mean = tags_base.copy()
+            tags_mean["det_stat"] = "mean"
+            vals.append(mean)
+            tags.append(tags_mean)
+
+        obs_time = [meta.obs_info.timestamp] * len(vals)
+        return {
+            "field": cls._influx_field,
+            "values": vals,
+            "timestamps": obs_time,
+            "tags": tags,
+        }
