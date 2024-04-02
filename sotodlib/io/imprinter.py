@@ -425,8 +425,7 @@ class Imprinter:
         if not self.build_hk:
             return
         
-        with open(self.g3tsmurf_config, "r") as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if min_ctime is None:
@@ -578,8 +577,7 @@ class Imprinter:
                 session.commit()
 
     def get_book_path(self, book):
-        with open(self.g3tsmurf_config, "r") as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
@@ -611,8 +609,7 @@ class Imprinter:
         ancil_drop_duplicates=False,
     ):
         """get the appropriate bookbinder for the book based on its type"""
-        with open(self.g3tsmurf_config, "r") as f:
-            g3tsmurf_cfg = yaml.safe_load(f)
+        g3tsmurf_cfg = load_configs(self.g3tsmurf_config)
         lvl2_data_root = g3tsmurf_cfg["data_prefix"]
 
         if book.type in ["obs", "oper"]:
