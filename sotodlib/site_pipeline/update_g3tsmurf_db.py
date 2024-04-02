@@ -71,15 +71,24 @@ def main(config: Optional[str] = None, update_delay: float = 2,
 
     updates_start = dt.datetime.now().timestamp()
 
-    SMURF.index_metadata(min_ctime=min_time.timestamp())
-    SMURF.index_archive(min_ctime=min_time.timestamp(), show_pb=show_pb)
-    if index_via_actions:
-        SMURF.index_action_observations(min_ctime=min_time.timestamp())    
-    SMURF.index_timecodes(min_ctime=min_time.timestamp())
-    SMURF.update_finalization(update_time=updates_start)
-    SMURF.last_update = updates_start
-
     session = SMURF.Session()
+    SMURF.index_metadata(min_ctime=min_time.timestamp(), session=session)
+    SMURF.index_archive(
+        min_ctime=min_time.timestamp(), 
+        show_pb=show_pb, 
+        session=session
+    )
+    if index_via_actions:
+        SMURF.index_action_observations(
+            min_ctime=min_time.timestamp(),
+            session=session
+        )    
+    SMURF.index_timecodes(
+        min_ctime=min_time.timestamp(),
+        session=session
+    )
+    SMURF.update_finalization(update_time=updates_start, session=session)
+    SMURF.last_update = updates_start
 
     new_obs = session.query(Observations).filter(
         Observations.start >= min_time
