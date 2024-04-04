@@ -91,7 +91,10 @@ def main(config: Optional[str] = None, update_delay: float = 2,
     SMURF.last_update = updates_start
 
     new_obs = session.query(Observations).filter(
-        Observations.start >= min_time
+        or_(
+            Observations.start >= min_time,
+            Observations.start == None,
+        )
     ).all()
 
     for obs in new_obs:
