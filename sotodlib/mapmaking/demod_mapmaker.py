@@ -145,19 +145,22 @@ class DemodSignalMap(DemodSignal):
             if pmap is None:
                 # Build the local geometry and pointing matrix for this observation
                 if self.recenter:
-                    rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter,
-                        ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
+                    rot = recentering_to_quat_lonlat(*evaluate_recentering(self.recenter, ctime=ctime[len(ctime)//2], geom=(self.rhs.shape, self.rhs.wcs), site=unarr(obs.site)))
                 else: rot = None
                 # we handle cuts here through obs.flags
                 if split_labels == None:
                     # this is the case with no splits
-                    rangesmatrix = obs.flags.jumps_2pi + obs.flags.glitches + obs.flags.turnarounds
+                    rangesmatrix = obs.flags.glitch_flags
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix, hwp=True)
                 else:
                     # this is the case where we are processing a split. We need to figure out what type of split it is (detector, samples), build the RangesMatrix mask and create the pmap.
                     if split_labels[n_split] in ['det_left','det_right','det_in','det_out','det_upper','det_lower']:
                         # then we are in a detector fixed in time split.
                         rangesmatrix = obs.flags.jumps_2pi + obs.flags.glitches + obs.det_flags[split_labels[n_split]] + obs.flags.turnarounds
+                    elif split_labels[n_split] == 'scan_left':
+                        rangesmatrix = obs.flags.jumps_2pi + obs.flags.glitches + obs.flags.turnarounds + obs.flags.left_scan
+                    elif split_labels[n_split] == 'scan_right':
+                        rangesmatrix = obs.flags.jumps_2pi + obs.flags.glitches + obs.flags.turnarounds + obs.flags.right_scan
                     pmap_local = coords.pmat.P.for_tod(obs, comps=self.comps, geom=self.rhs.geometry, rot=rot, threads="domdir", weather=unarr(obs.weather), site=unarr(obs.site), cuts=rangesmatrix, hwp=True)
             else:
                 pmap_local = pmap

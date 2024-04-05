@@ -1,51 +1,86 @@
 from argparse import ArgumentParser
-import numpy as np, sys, time, warnings, os, so3g, logging
+import numpy as np, sys, time, warnings, os, so3g, logging, yaml, sqlite3, itertools
+from sotodlib import coords, mapmaking
 from sotodlib.core import Context,  metadata as metadata_core, FlagManager
 from sotodlib.core.flagman import has_any_cuts, has_all_cut
-from sotodlib.io import metadata   # PerDetectorHdf5 work-around
-from sotodlib import tod_ops, coords, mapmaking
+from sotodlib.io import metadata
 from sotodlib.tod_ops import flags, jumps, gapfill, filters, detrend_tod, apodize, pca
 from sotodlib.hwp import hwp
 from pixell import enmap, utils, fft, bunch, wcsutils, tilemap, colors, memory, mpi
 from scipy import ndimage, interpolate
-import sqlite3 
-import itertools
-
 from . import util
+
+defaults = {"query": "1",
+            "odir": "./output",
+            "comps": "TQU",
+            "mode": "per_obs",
+            "ntod": None,
+            "tods": None,
+            "nset": None,
+            "wafer": None,
+            "center_at": None,
+            "site": 'so_sat1',
+            "max_dets": None, # not implemented yet
+            "verbose": 0,
+            "quiet": 0,
+            "tiled": 0, # not implemented yet
+            "singlestream": False,
+            "only_hits": False,
+            "det_in_out": False,
+            "det_left_right":False,
+            "det_upper_lower":False,
+            "scan_left_right":False,
+            "tasks_per_group":1,
+            "window":0.0, # not implemented yet
+            "dtype_tod": np.float32,
+            "dtype_map": np.float64,
+            "atomic_db": "atomic_maps.db",
+            "fixed_time": None,
+            "mindur": None,
+           }
 
 def get_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser()
-    parser.add_argument("context", help='context file')    
-    parser.add_argument("query", help='query, can be a file (list of obs_id) or selection string')
-    parser.add_argument("area", help='wcs geometry')
-    parser.add_argument("odir", help='output directory')
-    parser.add_argument("--mode", type=str, default='per_obs')
-    parser.add_argument("--comps",   type=str, default="TQU")
+    parser.add_argument("--config-file", type=str, default=None, 
+                     help="Path to mapmaker config.yaml file")
+    
+    parser.add_argument("--context", help='context file')    
+    parser.add_argument("--query", help='query, can be a file (list of obs_id) or selection string')
+    parser.add_argument("--area", help='wcs geometry')
+    parser.add_argument("--odir", help='output directory')
+    parser.add_argument("--mode", type=str, )
+    parser.add_argument("--comps",   type=str,)
     parser.add_argument("--singlestream", action="store_true")
-    parser.add_argument("--only-hits", action="store_true") # this will work only when we don't request splits, since I want to avoid loading the signal
+    parser.add_argument("--only_hits", action="store_true") # this will work only when we don't request splits, since I want to avoid loading the signal
     
     # detector position splits (fixed in time)
-    parser.add_argument("--det-in-out", action="store_true")
-    parser.add_argument("--det-left-right", action="store_true")
-    parser.add_argument("--det-upper-lower", action="store_true")
+    parser.add_argument("--det_in_out", action="store_true")
+    parser.add_argument("--det_left_right", action="store_true")
+    parser.add_argument("--det_upper_lower", action="store_true")
     
-    parser.add_argument("--ntod",    type=int, default=None)
-    parser.add_argument("--tods",    type=str, default=None)
-    parser.add_argument("--nset",    type=int, default=None)
-    parser.add_argument("--max-dets",type=int, default=None)
-    parser.add_argument("--fixed-time", type=int, default=None)
-    parser.add_argument("--mindur", type=int, default=None)
-    parser.add_argument("--tasks-per-group", type=int,   default=1)
-    parser.add_argument("--site",    type=str, default="so_sat1")
-    parser.add_argument("--verbose", action="count", default=0)
-    parser.add_argument("--quiet",   action="count", default=0)
-    parser.add_argument("--window",  type=float, default=5.0)
-    parser.add_argument("--dtype_tod",    default=np.float32)
-    parser.add_argument("--dtype_map",    default=np.float64)
-    parser.add_argument("--atomic-db",    default='atomic_maps.db', help='name of the atomic map database, will be saved where make_filterbin_map is being run')
+    # time samples splits
+    parser.add_argument("--scan_left_right", action="store_true")
     
+    parser.add_argument("--ntod",    type=int, )
+    parser.add_argument("--tods",    type=str, )
+    parser.add_argument("--nset",    type=int, )
+    parser.add_argument("--wafer",   type=str, help="Detector set to map with")
+    parser.add_argument("--max-dets",type=int, )
+    parser.add_argument("--fixed_ftime", type=int, )
+    parser.add_argument("--mindur", type=int, )
+    parser.add_argument("--tasks_per_group", type=int, )
+    parser.add_argument("--site",    type=str, )
+    parser.add_argument("--verbose", action="count", )
+    parser.add_argument("--quiet",   action="count", )
+    parser.add_argument("--window",  type=float, )
+    parser.add_argument("--dtype_tod",  )
+    parser.add_argument("--dtype_map",  )
+    parser.add_argument("--atomic_db", help='name of the atomic map database, will be saved where make_filterbin_map is being run')
     return parser
+
+def _get_config(config_file):
+    return yaml.safe_load(open(config_file,'r'))
 
 def get_ra_ref(obs, site='so_sat1'):
     # pass an AxisManager of the observation, and return two ra_ref @ dec=-40 deg.   
@@ -58,13 +93,15 @@ def get_ra_ref(obs, site='so_sat1'):
     
     csl = so3g.proj.CelestialSightLine.az_el(t_start*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
-    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
-    ra_ref_start = spline(-40*utils.degree, nu=0)
+    #spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
+    ra_ref_start = np.interp(-40*utils.degree, dec_, ra_)
+    #ra_ref_start = spline(-40*utils.degree, nu=0)
     
     csl = so3g.proj.CelestialSightLine.az_el(t_stop*np.ones(len(az)), az, el*np.ones(len(az)), site=site, weather='toco')
     ra_, dec_ = csl.coords().transpose()[:2]
-    spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
-    ra_ref_stop = spline(-40*utils.degree, nu=0)
+    #spline = interpolate.CubicSpline(dec_, ra_, bc_type='not-a-knot')
+    #ra_ref_stop = spline(-40*utils.degree, nu=0)
+    ra_ref_stop = np.interp(-40*utils.degree, dec_, ra_)
     return ra_ref_start, ra_ref_stop
 
 def tele2equ(coords, ctime, detoffs=[0,0], site="so_sat1"):
@@ -76,8 +113,7 @@ def tele2equ(coords, ctime, detoffs=[0,0], site="so_sat1"):
     nsamp, ndet = cflat.shape[1], dflat.shape[1]
     assert cflat.shape[1:] == tflat.shape, "tele2equ coords and ctime have incompatible shapes %s vs %s" % (str(coords.shape), str(ctime.shape))
     # Set up the transform itself
-    sight  = so3g.proj.CelestialSightLine.az_el(tflat, cflat[0], cflat[1],
-            roll=cflat[2] if len(cflat) > 2 else 0, site=site, weather="toco")
+    sight  = so3g.proj.CelestialSightLine.az_el(tflat, cflat[0], cflat[1], roll=cflat[2] if len(cflat) > 2 else 0, site=site, weather="toco")
     # To support other coordiante systems I would add
     # if rot is not None: sight.Q = rot * sight.Q
     dummy  = np.arange(ndet)
@@ -140,11 +176,87 @@ def find_footprint(context, tods, ref_wcs, comm=mpi.COMM_WORLD, return_pixboxes=
     if return_pixboxes: return shape, wcs, pixboxes
     else: return shape, wcs
 
-
-def calibrate_obs_new(obs, dtype_tod=np.float32, det_left_right=False, det_in_out=False, det_upper_lower=False):
+def calibrate_obs_with_preprocessing(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=False, det_in_out=False, det_upper_lower=False):
     obs.wrap("weather", np.full(1, "toco"))
-    obs.wrap("site",    np.full(1, "so_sat1"))
+    obs.wrap("site",    np.full(1, site))
+    obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])    
+    # Since now I have flags already calculated, I can union them into a "glitch_flags" flags, which will be used to discard overcut detectors and calculate the cost for MPI.
+    bad_dets = has_all_cut(obs.preprocess.det_bias_flags.det_bias_flags)
+    obs.restrict('dets', obs.dets.vals[~bad_dets])
+    tdets = has_any_cuts(obs.preprocess.trends.trend_flags)
+    obs.restrict('dets', obs.dets.vals[~tdets])
+    gstats = obs.preprocess.glitches.glitch_flags.get_stats()
+    obs.restrict('dets', obs.dets.vals[np.asarray(gstats['intervals']) < 10])
+    # Union of flags into glitch_flags.
+    obs.flags.wrap('glitch_flags', obs.preprocess.turnaround_flags.turnarounds + obs.preprocess.jumps_2pi.jump_flag + obs.preprocess.glitches.glitch_flags, )
+    
+    good_dets = mapmaking.find_usable_detectors(obs)
+    obs.restrict("dets", good_dets)
+    
+    if obs.signal is not None and len(good_dets)>0:
+        # Adding detector splits if we asked for them
+        if det_left_right or det_in_out or det_upper_lower:
+            # we add a flagmanager for the detector flags
+            obs.wrap('det_flags', FlagManager.for_tod(obs))
+            if det_left_right or det_in_out:
+                xi = obs.focal_plane.xi
+                # sort xi 
+                xi_median = np.median(xi)    
+            if det_upper_lower or det_in_out:
+                eta = obs.focal_plane.eta
+                # sort eta
+                eta_median = np.median(eta)
+            if det_left_right:
+                mask = xi <= xi_median
+                obs.det_flags.wrap_dets('det_left', np.logical_not(mask))
+                mask = xi > xi_median
+                obs.det_flags.wrap_dets('det_right', np.logical_not(mask))
+            if det_upper_lower:
+                mask = eta <= eta_median
+                obs.det_flags.wrap_dets('det_lower', np.logical_not(mask))
+                mask = eta > eta_median
+                obs.det_flags.wrap_dets('det_upper', np.logical_not(mask))
+            if det_in_out:
+                # the bounding box is the center of the detset
+                xi_center = np.min(xi) + 0.5 * (np.max(xi) - np.min(xi))
+                eta_center = np.min(eta) + 0.5 * (np.max(eta) - np.min(eta))
+                radii = np.sqrt((xi_center-xi)**2 + (eta_center-eta)**2)
+                radius_median = np.median(radii)
+                mask = radii <= radius_median
+                obs.det_flags.wrap_dets('det_in', np.logical_not(mask))
+                mask = radii > radius_median
+                obs.det_flags.wrap_dets('det_out', np.logical_not(mask))
+        
+        # preprocessing
+        detrend_tod(obs, method='median')
+        hwp.get_hwpss(obs)
+        hwp.subtract_hwpss(obs)
+        jflags, _, jfix = jumps.twopi_jumps(obs, signal=obs.hwpss_remove, fix=True, overwrite=True)
+        obs.hwpss_remove = jfix
+        gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1, signal=obs.hwpss_remove, glitch_flags=obs.preprocess.jumps_2pi.jump_flag)
+        obs.hwpss_remove=gfilled    
+        detrend_tod(obs, method='median', signal_name='hwpss_remove')
+        obs.signal = np.multiply(obs.signal.T, obs.det_cal.phase_to_pW).T
+        obs.hwpss_remove = np.multiply(obs.hwpss_remove.T, obs.det_cal.phase_to_pW).T
+        # PCA relcal
+        filt = filters.low_pass_sine2(1, width=0.1)
+        sigfilt = filters.fourier_filter(obs, filt, signal_name='hwpss_remove')
+        obs.wrap('lpf_hwpss_remove', sigfilt, [(0,'dets'),(1,'samps')])
+        obs.restrict('samps',(10*200, -10*200))
+        if obs.dets.count<=1: return obs # check if we have enough detectors
+        pca_out = pca.get_pca(obs,signal=obs.lpf_hwpss_remove)
+        pca_signal = pca.get_pca_model(obs, pca_out, signal=obs.lpf_hwpss_remove)
+        median = np.median(pca_signal.weights[:,0])
+        obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/median).T
+        apodize.apodize_cosine(obs)
+    return obs
+
+def calibrate_obs_new(obs, dtype_tod=np.float32, site='so_sat1', det_left_right=False, det_in_out=False, det_upper_lower=False):
+    obs.wrap("weather", np.full(1, "toco"))
+    obs.wrap("site",    np.full(1, site))
     obs.wrap('glitch_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
+    # Restrict non optical detectors, which have nans in their focal plane coordinates and will crash the mapmaking operation.
+    obs.restrict('dets', obs.dets.vals[obs.det_info.wafer.type == 'OPTC'])
     
     if obs.signal is not None:
         # this will happen in the read_tod call, where we will add the detector flags
@@ -182,21 +294,22 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, det_left_right=False, det_in_ou
                 
     # this is from Max's notebook
     if obs.signal is not None:
-        flags.get_turnaround_flags(obs)
         flags.get_det_bias_flags(obs, rfrac_range=(0.05, 0.9), psat_range=(0, 20))
         bad_dets = has_all_cut(obs.flags.det_bias_flags)
         obs.restrict('dets', obs.dets.vals[~bad_dets])
+        if obs.dets.count<=1: return obs # check if I cut all the detectors after the det bias flags
         detrend_tod(obs, method='median')
         hwp.get_hwpss(obs)
         hwp.subtract_hwpss(obs)
         flags.get_trending_flags(obs, max_trend=2.5, n_pieces=10)
         tdets = has_any_cuts(obs.flags.trends)
         obs.restrict('dets', obs.dets.vals[~tdets])
+        if obs.dets.count<=1: return obs # check if I cut all the detectors after the trending flags
         jflags, _, jfix = jumps.twopi_jumps(obs, signal=obs.hwpss_remove, fix=True, overwrite=True)
         obs.hwpss_remove = jfix
         gfilled = gapfill.fill_glitches(obs, nbuf=10, use_pca=False, modes=1, signal=obs.hwpss_remove, glitch_flags=obs.flags.jumps_2pi)
         obs.hwpss_remove = gfilled
-        gflags = flags.get_glitch_flags(obs, t_glitch=1e-5, buffer=10, signal='hwpss_remove', hp_fc=1, n_sig=10, overwrite=True)
+        gflags = flags.get_glitch_flags(obs, t_glitch=1e-5, buffer=10, signal_name='hwpss_remove', hp_fc=1, n_sig=10, overwrite=True)
         #gdets = has_any_cuts(obs.flags.glitches)
         gstats = obs.flags.glitches.get_stats()
         obs.restrict('dets', obs.dets.vals[np.asarray(gstats['intervals']) < 10])
@@ -210,14 +323,18 @@ def calibrate_obs_new(obs, dtype_tod=np.float32, det_left_right=False, det_in_ou
             sigfilt = filters.fourier_filter(obs, filt, signal_name='hwpss_remove')
             obs.wrap('lpf_hwpss_remove', sigfilt, [(0,'dets'),(1,'samps')])
             obs.restrict('samps',(10*200, -10*200))
+            # check if we have enough detectors
+            if obs.dets.count<=1: return obs
             pca_out = pca.get_pca(obs,signal=obs.lpf_hwpss_remove)
             pca_signal = pca.get_pca_model(obs, pca_out, signal=obs.lpf_hwpss_remove)
             median = np.median(pca_signal.weights[:,0])
             obs.signal = np.divide(obs.signal.T, pca_signal.weights[:,0]/median).T
-        apodize.apodize_cosine(obs, apodize_samps=800)  
+        apodize.apodize_cosine(obs, apodize_samps=800)
     return obs
 
 def calibrate_obs_after_demod(obs, dtype_tod=np.float32):
+    obs.restrict('samps',(30*200, -30*200))
+    
     # project out T
     filt = filters.low_pass_sine2(0.5, width=0.1)
     T_lpf = filters.fourier_filter(obs, filt, signal_name='dsT')
@@ -283,7 +400,7 @@ def calibrate_obs(obs, dtype_tod=np.float32):
     
     if obs.signal is not None:
         # FLAGS
-        tod_ops.flags.get_turnaround_flags(obs)
+        flags.get_turnaround_flags(obs)
         #tod_ops.flags.get_det_bias_flags(obs)
         #obs.wrap('flags.det_bias_flags', so3g.proj.RangesMatrix.zeros(obs.shape[:2]),[(0, 'dets'), (1, 'samps')])
         
@@ -333,7 +450,7 @@ def calibrate_obs(obs, dtype_tod=np.float32):
     #obs.focal_plane.gamma += obs.boresight_offset.gamma
     return obs
 
-def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, dtype_tod=np.float32, only_hits=False ):
+def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False, dtype_tod=np.float32, only_hits=False, site='so_sat1' ):
     my_tods = []
     my_inds = []
     my_ra_ref = []
@@ -342,7 +459,7 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
         obs_id, detset, band, obs_ind = obslist[ind]
         try:
             tod = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=no_signal)
-            tod = calibrate_obs_new(tod, dtype_tod=dtype_tod)
+            tod = calibrate_obs_with_preprocessing(tod, dtype_tod=dtype_tod, site=site)
             if only_hits==False:
                 ra_ref_start, ra_ref_stop = get_ra_ref(tod)
                 my_ra_ref.append((ra_ref_start/utils.degree, ra_ref_stop/utils.degree))
@@ -350,11 +467,10 @@ def read_tods(context, obslist, inds=None, comm=mpi.COMM_WORLD, no_signal=False,
                 my_ra_ref.append(None)
             my_tods.append(tod)
             my_inds.append(ind)
-            
         except RuntimeError: continue
     return my_tods, my_inds, my_ra_ref
 
-def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD, tag="", verbose=0):
+def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD, tag="", verbose=0, site='so_sat1'):
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
     
@@ -365,35 +481,29 @@ def write_hits_map(context, obslist, shape, wcs, t0=0, comm=mpi.COMM_WORLD, tag=
         name = "%s:%s:%s" % (obs_id, detset, band)
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
-        #obs = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band})
         obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, no_signal=True)
-        obs = calibrate_obs_new(obs)
+        obs = calibrate_obs_new(obs, site=site)
         rot = None
         pmap_local = coords.pmat.P.for_tod(obs, comps='T', geom=hits.geometry, rot=rot, threads="domdir", weather=mapmaking.unarr(obs.weather), site=mapmaking.unarr(obs.site), hwp=True)
         obs_hits = pmap_local.to_weights(obs, comps='T', )
-        #print('shape of hits', hits.shape)
-        #print('shape of obs_hits', obs_hits.shape)
-        
         hits = hits.insert(obs_hits[0,0], op=np.ndarray.__iadd__)
     return bunch.Bunch(hits=hits)
 
-def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, split_labels=None, time_split_leftright=False, singlestream=False, det_in_out=False, det_left_right=False, det_upper_lower=False):
-    #det_split_masks is the dictionary that contains detector masks for each split we want to make. Each key has format freq_wafer_split, e.g. f090_w25_detleft, f150_w26_detupper, f090_w27_detin. We need to figure out how many split we'll make 2 per split mode.
+def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0, dtype_tod=np.float32, dtype_map=np.float64, comm=mpi.COMM_WORLD, tag="", verbose=0, split_labels=None, singlestream=False, det_in_out=False, det_left_right=False, det_upper_lower=False, site='so_sat1', recenter=None):
     L = logging.getLogger(__name__)
     pre = "" if tag is None else tag + " "
     if comm.rank == 0: L.info(pre + "Initializing equation system")
     # Set up our mapmaking equation
     if split_labels==None:
         # this is the case where we did not request any splits at all
-        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", singlestream=singlestream )
+        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", singlestream=singlestream, recenter=recenter )
     else:
         # this is the case where we asked for at least 2 splits (1 split set). We count how many split we'll make, we need to define the Nsplits maps inside the DemodSignalMap
         Nsplits = len(split_labels)
-        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", Nsplits=Nsplits, singlestream=singlestream)
+        signal_map = mapmaking.DemodSignalMap(shape, wcs, comm, comps=comps, dtype=dtype_map, tiled=False, ofmt="", Nsplits=Nsplits, singlestream=singlestream, recenter=recenter)
     signals    = [signal_map]
     mapmaker   = mapmaking.DemodMapmaker(signals, noise_model=noise_model, dtype=dtype_tod, verbose=verbose>0, singlestream=singlestream)
     if comm.rank == 0: L.info(pre + "Building RHS")
-    time_rhs   = signal_map.rhs*0 # this has an extra axis now for different splits, because signal_map.rhs does
     # And feed it with our observations
     nobs_kept  = 0
     for oi in range(len(obslist)):
@@ -401,23 +511,20 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         name = "%s:%s:%s" % (obs_id, detset, band)
         # Read in the signal too. This seems to read in all the metadata from scratch,
         # which is pointless, but shouldn't cost that much time.
-        #obs = context.get_obs(obs_id, dets={"wafer_slot" : [detset], "band":band})
-        obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )        
-        obs = calibrate_obs_new(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower)
-        
+        obs = context.get_obs(obs_id, dets={"wafer_slot":detset, "wafer.bandpass":band}, )
+        """
+        if obs.hwp_solution.primary_encoder == 1:
+            obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_1) + np.deg2rad(1.66-360*255/1440-90), 2*np.pi)
+        elif obs.hwp_solution.primary_encoder == 2:
+            obs.hwp_angle = np.mod(-1*np.unwrap(obs.hwp_solution.hwp_angle_ver3_2) + np.deg2rad(1.66-360*255/1440+90), 2*np.pi)
+        """
+        obs = calibrate_obs_with_preprocessing(obs, dtype_tod=dtype_tod, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower, site=site)
+        # here we check if we have enough dets to keep going, otherwise we continue
+        if obs.dets.count <= 1: continue
         # demodulate
         if singlestream == False:
             hwp.demod_tod(obs)
-            obs = calibrate_obs_after_demod(obs, dtype_tod=dtype_tod)
-        
-        # filter 
-        #if singlestream:
-        #    obs.signal = filters.fourier_filter(obs, filters.high_pass_sine2(0.5))
-        #else:
-        #    obs.dsT    = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='dsT')
-        #    obs.demodQ = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='demodQ')
-        #    obs.demodU = filters.fourier_filter(obs, filters.high_pass_sine2(0.3), signal_name='demodU')
-                
+            obs = calibrate_obs_after_demod(obs, dtype_tod=dtype_tod)        
         if obs.dets.count == 0: continue
         
         # And add it to the mapmaker
@@ -427,34 +534,6 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
         else:
             # this is the case of having splits. We need to pass the split_labels at least. If we have detector splits fixed in time, then we pass the masks in det_split_masks. Otherwise, det_split_masks will be None
             mapmaker.add_obs(name, obs, split_labels=split_labels)
-        
-        if split_labels==None:
-            # Case of no splits 
-            # Also build the RHS for the per-pixel timestamp. First
-            # make a white noise weighted timestamp per sample timestream
-            Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
-            Nt += obs.timestamps - t0
-            Nt *= mapmaker.data[-1].nmat.ivar[:,None] # this is the data in the mapmaker object, which is simply a list 
-            # Bin into pixels
-            pmap = signal_map.data[(name,0)].pmap
-            obs_time_rhs = pmap.zeros()
-            pmap.to_map(dest=obs_time_rhs, signal=Nt,)
-            # Accumulate into output array
-            time_rhs[0] = time_rhs[0].insert(obs_time_rhs, op=np.ndarray.__iadd__)
-        else:
-            for n_split in range(Nsplits):
-                # Also build the RHS for the per-pixel timestamp. First
-                # make a white noise weighted timestamp per sample timestream
-                Nt  = np.zeros_like(obs.signal, dtype=dtype_tod)
-                Nt += obs.timestamps - t0
-                Nt *= mapmaker.data[-1].nmat.ivar[:,None] # this is the data in the mapmaker object, which is simply a list 
-                # Bin into pixels
-                pmap = signal_map.data[(name,n_split)].pmap
-                obs_time_rhs = pmap.zeros()
-                pmap.to_map(dest=obs_time_rhs, signal=Nt,)
-                # Accumulate into output array
-                time_rhs[n_split] = time_rhs[n_split].insert(obs_time_rhs, op=np.ndarray.__iadd__)
-        del obs, pmap, Nt, obs_time_rhs
         nobs_kept += 1
         L.info('Done with tod %s:%s:%s'%(obs_id,detset,band))
     
@@ -462,31 +541,17 @@ def make_depth1_map(context, obslist, shape, wcs, noise_model, comps="TQU", t0=0
     if nobs_kept == 0: raise DataMissing("All data cut")
     for signal in signals:
         signal.prepare()
-    # mapmaker doesn't know about time_rhs, so handle it manually
-    if signal_map.tiled: time_rhs = tilemap.redistribute(time_rhs, comm)
-    else:                time_rhs = utils.allreduce     (time_rhs, comm)
-    
     if comm.rank == 0: L.info(pre + "Writing F+B outputs")
-    #map = [] ; ivar = [] ; tmap =[] ; 
     wmap = []
     weights = []
     for n_split in range(signal_map.Nsplits):
-        #if signal_map.tiled: 
-            #map.append( tilemap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
-        #else: 
-            #map.append( enmap.map_mul(signal_map.idiv[n_split], signal_map.rhs[n_split]) )
-        #ivar.append( signal_map.div[n_split] )
         wmap.append( signal_map.rhs[n_split] )
         weights.append(signal_map.div[n_split])
-        #with utils.nowarn(): tmap.append( utils.remove_nan(time_rhs[n_split] / ivar[-1][0,0]) )
-    #return bunch.Bunch(map=map, ivar=ivar, tmap=tmap, wmap=wmap, signal=signal_map, t0=t0 )
     return bunch.Bunch(wmap=wmap, weights=weights, signal=signal_map, t0=t0 )
 
 def write_depth1_map(prefix, data, split_labels=None):
     if split_labels==None:
         # we have no splits, so we save index 0 of the lists
-        #data.signal.write(prefix, "full_map",  data.map[0])
-        #data.signal.write(prefix, "full_ivar", data.ivar[0])
         data.signal.write(prefix, "full_wmap", data.wmap[0])
         data.signal.write(prefix, "full_weights", data.weights[0])
         data.signal.write(prefix, "full_hits", data.signal.hits)
@@ -494,8 +559,6 @@ def write_depth1_map(prefix, data, split_labels=None):
         # we have splits
         Nsplits = len(split_labels)
         for n_split in range(Nsplits):
-            #data.signal.write(prefix, "%s_map"%split_labels[n_split],  data.map[n_split])
-            #data.signal.write(prefix, "%s_ivar"%split_labels[n_split], data.ivar[n_split])
             data.signal.write(prefix, "%s_wmap"%split_labels[n_split], data.wmap[n_split])
             data.signal.write(prefix, "%s_weights"%split_labels[n_split], data.weights[n_split])
             data.signal.write(prefix, "%s_hits"%split_labels[n_split], data.signal.hits[n_split])
@@ -536,29 +599,48 @@ class LogInfoFilter(logging.Filter):
         record.memmax= memory.max()/1024.**3
         return record
 
-def handle_empty(prefix, tag, comm, e):
+def handle_empty(prefix, tag, comm, e, L):
     # This happens if we ended up with no valid tods for some reason
     if comm.rank == 0:
         L.info("%s Skipped: %s" % (tag, str(e)))
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
-    
-def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='TQU', det_in_out=False, det_left_right=False, det_upper_lower=False, ntod=None, tods=None, nset=None, max_dets=None, fixed_time=None, mindur=None, tasks_per_group=1, site='so_sat1', verbose=0, quiet=0, window=5.0, dtype_tod=np.float32, dtype_map=np.float64, singlestream=False, atomic_db='atomic_maps.db', only_hits=False):
+
+def main(config_file=None, defaults=defaults, **args):    
+    cfg = dict(defaults)
+    # Update the default dict with values provided from a config.yaml file
+    if config_file is not None:
+        cfg_from_file = _get_config(config_file)
+        cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
+    else:
+        print("No config file provided, assuming default values") 
+    # Merge flags from config file and defaults with any passed through CLI
+    cfg.update({k: v for k, v in args.items() if v is not None})
+    # Certain fields are required. Check if they are all supplied here
+    required_fields = ['context','area']
+    for req in required_fields:
+        if req not in cfg.keys():
+            raise KeyError("{} is a required argument. Please supply it in a config file or via the command line".format(req))
+    args = cfg
     warnings.simplefilter('ignore')
+    
     # Set up our communicators
     comm       = mpi.COMM_WORLD
-    comm_intra = comm.Split(comm.rank // tasks_per_group)
-    comm_inter = comm.Split(comm.rank  % tasks_per_group)
+    comm_intra = comm.Split(comm.rank // args['tasks_per_group'])
+    comm_inter = comm.Split(comm.rank  % args['tasks_per_group'])
 
-    verbose    = verbose - quiet
-    shape, wcs = enmap.read_map_geometry(area)
+    verbose = args['verbose'] - args['quiet']
+    shape, wcs = enmap.read_map_geometry(args['area'])
     wcs        = wcsutils.WCS(wcs.to_header())
 
     noise_model = mapmaking.NmatWhite()
-    #comps      = comps
-    ncomp      = len(comps)
+    ncomp      = len(args['comps'])
     meta_only  = False
-    utils.mkdir(odir)
+    utils.mkdir(args['odir'])
+    
+    recenter = None
+    if args['center_at']:
+        recenter = mapmaking.parse_recentering(args['center_at'])
     
     # Set up logging.
     L   = logging.getLogger(__name__)
@@ -569,28 +651,31 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
     ch.addFilter(LogInfoFilter(comm_intra.rank))
     L.addHandler(ch)
 
-    context = Context(context)
-    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, query, mode=mode, nset=nset, ntod=ntod, tods=tods, fixed_time=fixed_time, mindur=mindur)
+    context = Context(args['context'])
+    obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode=args['mode'], nset=args['nset'], wafer=args['wafer'], ntod=args['ntod'], tods=args['tods'], fixed_time=args['fixed_time'], mindur=args['mindur'])
     tags = []
     cwd = os.getcwd()
     
     split_labels = []
-    if det_in_out:
+    if args['det_in_out']:
         split_labels.append('det_in')
         split_labels.append('det_out')
-    if det_left_right:
+    if args['det_left_right']:
         split_labels.append('det_left')
         split_labels.append('det_right')
-    if det_upper_lower:
+    if args['det_upper_lower']:
         split_labels.append('det_upper')
         split_labels.append('det_lower')
+    if args['scan_left_right']:
+        split_labels.append('scan_left')
+        split_labels.append('scan_right')
     if not split_labels:
         #if the list 
         split_labels = None
     
     # we open the data base for checking
-    if os.path.isfile('./'+atomic_db) and only_hits==False:
-        conn = sqlite3.connect('./'+atomic_db) # open the connector, in reading mode only
+    if os.path.isfile('./'+args['atomic_db']) and not args['only_hits']:
+        conn = sqlite3.connect('./'+args['atomic_db']) # open the connector, in reading mode only
         cursor = conn.cursor()
         # Now we have obslists and splits ready, we look through the data base to remove the maps we already have from it
         for key, value in  obslists.items():
@@ -625,7 +710,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         obslist = obslists[obskeys[oi]]
         t       = utils.floor(periods[pid,0])
         t5      = ("%05d" % t)[:5]
-        prefix  = "%s/%s/atomic_%010d_%s_%s" % (odir, t5, t, detset, band)
+        prefix  = "%s/%s/atomic_%010d_%s_%s" % (args['odir'], t5, t, detset, band)
         
         tag     = "%5d/%d" % (oi+1, len(obskeys))
         utils.mkdir(os.path.dirname(prefix))
@@ -641,7 +726,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
         try:
             # 1. read in the metadata and use it to determine which tods are
             #    good and estimate how costly each is
-            my_tods, my_inds, my_ra_ref = read_tods(context, obslist, comm=comm_intra, no_signal=True, dtype_tod=dtype_tod, only_hits=only_hits )
+            my_tods, my_inds, my_ra_ref = read_tods(context, obslist, comm=comm_intra, no_signal=True, dtype_tod=args['dtype_tod'], only_hits=args['only_hits'] )
             # after read_tods the detector flags will be added to the axis manager
             my_costs  = np.array([tod.samps.count*len(mapmaking.find_usable_detectors(tod)) for tod in my_tods])
             # 2. prune tods that have no valid detectors
@@ -649,7 +734,7 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
             my_tods, my_inds, my_costs = [[a[vi] for vi in valid] for a in [my_tods, my_inds, my_costs]]
             
             # this is for the tags
-            if only_hits==False:
+            if not args['only_hits']:
                 if split_labels is None:
                     # this means the mapmaker was run without any splits requested
                     tags.append( (obslist[0][0], obs_infos[obslist[0][3]].telescope, band, detset, int(t), 'full', 'full', cwd+'/'+prefix+'_full', obs_infos[obslist[0][3]].el_center, obs_infos[obslist[0][3]].az_center, my_ra_ref[0][0], my_ra_ref[0][1], 0.0) )
@@ -666,42 +751,50 @@ def main(context=None, query=None, area=None, odir=None, mode='per_obs', comps='
             #    with a single task, but that task might not be the first one, so just
             #    make it mpi-aware like the footprint stuff
             my_infos = [obs_infos[obslist[ind][3]] for ind in my_inds]
-            profile  = find_scan_profile(context, my_tods, my_infos, comm=comm_intra)
-            subshape, subwcs = find_footprint(context, my_tods, wcs, comm=comm_intra)
+            if recenter is None:
+                profile  = find_scan_profile(context, my_tods, my_infos, comm=comm_intra)
+                subshape, subwcs = find_footprint(context, my_tods, wcs, comm=comm_intra)
+            else:
+                profile = None
+                subshape = shape
+                subwcs = wcs
             # 3. Write out the depth1 metadata
-            d1info = bunch.Bunch(profile=profile, pid=pid, detset=detset.encode(), band=band.encode(),
-                    period=periods[pid], ids=np.char.encode([obslist[ind][0] for ind in all_inds]),
-                    box=enmap.corners(subshape, subwcs), t=t)
-            if comm_intra.rank == 0:
-                write_depth1_info(prefix + "_info.hdf", d1info)
+            #d1info = bunch.Bunch(profile=profile, pid=pid, detset=detset.encode(), band=band.encode(),
+            #        period=periods[pid], ids=np.char.encode([obslist[ind][0] for ind in all_inds]),
+            #        box=enmap.corners(subshape, subwcs), t=t)
+            #if comm_intra.rank == 0:
+            #    write_depth1_info(prefix + "_info.hdf", d1info)
         except DataMissing as e:
             # This happens if we ended up with no valid tods for some reason
-            handle_empty(prefix, tag, comm_intra, e)
+            handle_empty(prefix, tag, comm_intra, e, L)
             continue
         # 4. redistribute the valid tasks. Tasks with nothing to do don't continue
         # past here.
         my_inds   = all_inds[utils.equal_split(all_costs, comm_intra.size)[comm_intra.rank]]
         comm_good = comm_intra.Split(len(my_inds) > 0)
         if len(my_inds) == 0: continue
-        if only_hits==False:
-            # 5. make the maps
-            mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, dtype_map=dtype_map, dtype_tod=dtype_tod, comps=comps, verbose=verbose, split_labels=split_labels, singlestream=singlestream, det_in_out=det_in_out, det_left_right=det_left_right, det_upper_lower=det_upper_lower)
+        if not args['only_hits']:
+            try:
+                # 5. make the maps
+                mapdata = make_depth1_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, noise_model, t0=t, comm=comm_good, tag=tag, recenter=recenter, dtype_map=args['dtype_map'], dtype_tod=args['dtype_tod'], comps=args['comps'], verbose=args['verbose'], split_labels=split_labels, singlestream=args['singlestream'], det_in_out=args['det_in_out'], det_left_right=args['det_left_right'], det_upper_lower=args['det_upper_lower'], site=args['site'])
                 # 6. write them
-            write_depth1_map(prefix, mapdata, split_labels=split_labels, )
-            #except DataMissing as e:
-            #    handle_empty(prefix, tag, comm_good, e)
+                write_depth1_map(prefix, mapdata, split_labels=split_labels, )
+            except DataMissing as e:
+                # This will happen if we decide to abort a map while we are doing the preprocessing.
+                handle_empty(prefix, tag, comm_good, e, L)
+                continue
         else:
-            mapdata = write_hits_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, t0=t, comm=comm_good, tag=tag, verbose=verbose,)
+            mapdata = write_hits_map(context, [obslist[ind] for ind in my_inds], subshape, subwcs, t0=t, comm=comm_good, tag=tag, verbose=args['verbose'],)
             if comm_intra.rank == 0:
                 oname = "%s_%s.%s" % (prefix, "full_hits", 'fits')
                 enmap.write_map(oname, mapdata.hits)
     comm.Barrier()
     # gather the tags for writing into the sqlite database
     tags_total = comm_inter.gather(tags, root=0)
-    if comm_inter.rank == 0 and only_hits==False:
+    if comm_inter.rank == 0 and not args['only_hits']:
         tags_total = list(itertools.chain.from_iterable(tags_total)) # this is because tags_total is a list of lists of tuples, and we want a list of tuples
         # Write into the atomic map database.
-        conn = sqlite3.connect('./'+atomic_db) # open the conector, if the database exists then it will be opened, otherwise it will be created
+        conn = sqlite3.connect('./'+args['atomic_db']) # open the conector, if the database exists then it will be opened, otherwise it will be created
         cursor = conn.cursor()
         
         # Check if the table exists, if not create it
