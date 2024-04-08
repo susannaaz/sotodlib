@@ -120,8 +120,9 @@ def setup_job(
                 else:
                     argparse_opts.extend([optkey, str(v)])
         if config_files is not None:
-            for conf in config_files:
-                argparse_opts.extend(["--config", conf])
+            argparse_opts.append("--config")
+            argparse_opts.extend(config_files)
+        print(f"interactive argparse_opts: {argparse_opts}")
 
     if parser is None:
         # Create a parser
