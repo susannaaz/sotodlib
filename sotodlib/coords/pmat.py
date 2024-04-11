@@ -123,24 +123,26 @@ class P:
 
     """
     def __init__(self, sight=None, fp=None, geom=None, comps='T',
-                 cuts=None, threads=None, det_weights=None, interpol=None, pixRangeMaxes=None):
+                 cuts=None, threads=None, det_weights=None, interpol=None, hp_geom=None):
         self.sight = sight
         self.fp = fp
-        self.geom = wrap_geom(geom)
+        if geom is not None:
+            self.geom = wrap_geom(geom)
         self.comps = comps
         self.cuts = cuts
         self.threads = threads
         self.active_tiles = None
         self.det_weights = det_weights
         self.interpol = interpol
-        self.pixRangeMaxes = pixRangeMaxes
+        self.hp_geom = hp_geom
+        self.hp_tiled = self.hp_geom is not None and self.hp_geom.nside_tile is not None
 
     @classmethod
     def for_tod(cls, tod, sight=None, geom=None, comps='T',
                 rot=None, cuts=None, threads=None, det_weights=None,
                 timestamps=None, focal_plane=None, boresight=None,
                 boresight_equ=None, wcs_kernel=None, weather='typical',
-                site='so', interpol=None, hwp=False, pixRangeMaxes=None):
+                site='so', interpol=None, hwp=False, hp_geom=None, qp_kwargs={}):
         """Set up a Projection Matrix for a TOD.  This will ultimately call
         the main P constructor, but some missing arguments will be
         extracted from tod and computed along the way.
@@ -179,7 +181,7 @@ class P:
                 assert(boresight is not None)
                 sight = so3g.proj.CelestialSightLine.az_el(
                     timestamps, boresight.az, boresight.el, roll=boresight.roll,
-                    site=site, weather=weather)
+                    site=site, weather=weather, **qp_kwargs)
         else:
             sight = _get_csl(sight)
 
@@ -195,12 +197,14 @@ class P:
             gamma = -gamma
         fp = so3g.proj.quat.rotation_xieta(xi, eta, gamma)
 
-        if geom is None and wcs_kernel is not None:
+        if (geom is None and wcs_kernel is not None) and hp_geom is None:
             geom = helpers.get_footprint(tod, wcs_kernel, sight=sight)
+        if (geom is not None) and hp_geom is not None:
+            raise ValueError("One of 'geom' and 'hp_geom' should be None")
 
         return cls(sight=sight, fp=fp, geom=geom, comps=comps,
                    cuts=cuts, threads=threads, det_weights=det_weights,
-                   interpol=interpol, pixRangeMaxes=pixRangeMaxes)
+                   interpol=interpol, hp_geom=hp_geom)
 
     @classmethod
     def for_geom(cls, tod, geom, comps='TQU', timestamps=None,
@@ -225,6 +229,10 @@ class P:
         """
         if super_shape is None:
             super_shape = (self._comp_count(comps), )
+        if (self.hp_geom is not None):
+            proj, _ = self._get_proj_threads()
+            return proj.zeros(super_shape)
+
         if self.tiled:
             # Need to fully resolve tiling to get occupied tiles.
             proj, _ = self._get_proj_threads()
@@ -426,14 +434,12 @@ class P:
         return len(comps)
 
     def _get_proj(self):
-        if self.geom is None:
+        interpol_kw = _get_interpol_args(self.interpol)
+        if self.hp_geom is not None:
+            return so3g.proj.ProjectionistHealpix.for_healpix(self.hp_geom.nside, ordering='NEST', nside_tile=self.hp_geom.nside_tile, active_tiles=self.active_tiles, **interpol_kw)
+        elif self.geom is None:
             raise ValueError("Can't project without a geometry!")
         # Backwards compatibility for old so3g
-        interpol_kw = _get_interpol_args(self.interpol)
-        if self.geom.wcs.wcs.ctype[0] == 'HPX':
-            if self.pixRangeMaxes is None:
-                self.pixRangeMaxes = [0, int(self.geom.shape[1])]
-            return so3g.proj.Projectionist.for_healpix(self.geom.shape, self.pixRangeMaxes, **interpol_kw)
         if self.tiled:
             return so3g.proj.Projectionist.for_tiled(
                 self.geom.shape, self.geom.wcs, self.geom.tile_shape,
@@ -461,8 +467,7 @@ class P:
         proj = self._get_proj()
         if cuts is None:
             cuts = self.cuts
-
-        if self.tiled and self.active_tiles is None:
+        if (self.tiled or self.hp_tiled) and self.active_tiles is None:
             logger.info('_get_proj_threads: get_active_tiles')
             if isinstance(self.threads, str) and self.threads == 'tiles':
                 logger.info('_get_proj_threads: assigning using "tiles"')
@@ -484,7 +489,7 @@ class P:
                     self._get_asm(), method=self.threads))
             elif self.threads == 'tiles':
                 # Computed above unless logic failed us...
-                self.threads = _thile_threads
+                self.threads = _tile_threads
             else:
                 raise ValueError('Request for unknown algo threads="%s"' % self.threads)
         if cuts:
