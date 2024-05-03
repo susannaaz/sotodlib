@@ -884,6 +884,19 @@ def handle_empty(prefix, tag, comm, e, L):
         utils.mkdir(os.path.dirname(prefix))
         with open(prefix + ".empty", "w") as ofile: ofile.write("\n")
 
+def setup_logging(comm, rank):
+    L = logging.getLogger(__name__)
+    L.setLevel(logging.INFO)
+    ch  = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    #ch.setFormatter(ColoredFormatter( "%(rank)3d " + "%3d %3d" % (comm.rank, comm.rank) + " %(wmins)7.2f %(mem)5.2f %(memmax)5.2f %(message)s"))
+    formatter = ColoredFormatter("%(rank)3d %(rank)3d %(wmins)7.2f %(mem)5.2f %(memmax)5.2f %(message)s")
+    ch.setFormatter(formatter)
+    ch.addFilter(LogInfoFilter(comm.rank))
+    L.addHandler(ch)
+
+    
+        
 def main(config_file=None, defaults=defaults, **args):    
     cfg = dict(defaults)
     # Update the default dict with values provided from a config.yaml file
@@ -891,14 +904,15 @@ def main(config_file=None, defaults=defaults, **args):
         cfg_from_file = _get_config(config_file)
         cfg.update({k: v for k, v in cfg_from_file.items() if v is not None})
     else:
-        print("No config file provided, assuming default values") 
+        print("No config file provided, assuming default values")
+        
     # Merge flags from config file and defaults with any passed through CLI
     cfg.update({k: v for k, v in args.items() if v is not None})
     # Certain fields are required. Check if they are all supplied here
     required_fields = ['context','area']
     for req in required_fields:
         if req not in cfg.keys():
-            raise KeyError("{} is a required argument. Please supply it in a config file or via the command line".format(req))
+            raise KeyError(f"{req} is a required argument. Please supply it in a config file or via the command line")
     args = cfg
     warnings.simplefilter('ignore')
     
@@ -920,18 +934,11 @@ def main(config_file=None, defaults=defaults, **args):
         recenter = mapmaking.parse_recentering(args['center_at'])
     
     # Set up logging.
-    L   = logging.getLogger(__name__)
-    L.setLevel(logging.INFO)
-    ch  = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(ColoredFormatter( "%(rank)3d " + "%3d %3d" % (comm.rank, comm.rank) + " %(wmins)7.2f %(mem)5.2f %(memmax)5.2f %(message)s"))
-    ch.addFilter(LogInfoFilter(comm.rank))
-    L.addHandler(ch)
+    setup_logging(comm, comm.rank)
 
     context = Context(args['context'])
     # obslists is a dict, obskeys is a list, periods is an array, only rank 0 will do this and broadcast to others.
     if comm.rank==0:
-        #obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode=args['mode'], nset=args['nset'], wafer=args['wafer'], freq=args['freq'], ntod=args['ntod'], tods=args['tods'], fixed_time=args['fixed_time'], mindur=args['mindur'])
         obslists, obskeys, periods, obs_infos = mapmaking.build_obslists(context, args['query'], mode=args['mode'], nset=args['nset'], wafer=args['wafer'], ntod=args['ntod'], tods=args['tods'], fixed_time=args['fixed_time'], mindur=args['mindur'])
         L.info('Done with build_obslists')
     else:
