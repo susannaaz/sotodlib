@@ -34,6 +34,7 @@ def get_det_bias_flags(aman, detcal=None, rfrac_range=(0.1, 0.7),
     psat_range : Tuple
         Tuple (lower_bound, upper_bound) for P_SAT from IV analysis.
         P_SAT in the IV analysis is the bias power at 90% Rn in pW.
+        If None, no flags are not applied from P_SAT. 
     rn_range : Tuple
         Tuple (lower_bound, upper_bound) for r_n det selection.
     si_nan : bool
@@ -464,7 +465,7 @@ def get_trending_flags(aman,
     if timestamps is None:
         timestamps = aman.timestamps
     assert len(timestamps) == signal.shape[1]
-
+    
     # This helps with floating point precision
     # Not modifying inplace since we don't want to touch aman.timestamps
     timestamps = timestamps - timestamps[0]
@@ -474,7 +475,7 @@ def get_trending_flags(aman,
     samp_edges = [0]
     
     # Get sampling rate
-    fs = 1 / np.nanmedian(np.diff(timestamps))
+    fs = 1. / np.nanmedian(np.diff(timestamps))
     n_samples_per_piece = int(t_piece * fs)
     # How many pieces can timestamps be divided into
     n_pieces = len(timestamps) // n_samples_per_piece

@@ -741,7 +741,7 @@ class GlitchFill(_Preprocess):
           use_pca: False
           modes: 1
           in_place: True
-          wrap_name: None
+          wrap: None
 
     .. autofunction:: sotodlib.tod_ops.gapfill.fill_glitches
     """
@@ -1113,10 +1113,10 @@ class PCARelCal(_Preprocess):
             pca_out = tod_ops.pca.get_pca(band_aman,signal=band_aman[self.signal])
             pca_signal = tod_ops.pca.get_pca_model(band_aman, pca_out,
                                         signal=band_aman[self.signal])
-            ## SA
-            #result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
-            print(isinstance(self.calc_cfgs, bool))
-            print(self.calc_cfgs)
+            if isinstance(self.calc_cfgs, bool):
+                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal)
+            else:
+                result_aman = tod_ops.pca.pca_cuts_and_cal(band_aman, pca_signal, **self.calc_cfgs)
 
             pca_det_mask[m0] = np.logical_or(pca_det_mask[m0], result_aman['pca_det_mask'])
             relcal[m0] = result_aman['relcal']
@@ -1163,6 +1163,7 @@ class PCARelCal(_Preprocess):
                 pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
+
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -1256,6 +1257,7 @@ class EstimateT2P(_Preprocess):
             T_sig_name: 'dsT'
             Q_sig_name: 'demodQ'
             U_sig_name: 'demodU'
+            joint_fit: True
             trim_samps: 2000
             lpf_cfgs:
               type: 'sine2'
