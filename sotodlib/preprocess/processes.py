@@ -1296,16 +1296,93 @@ class SubtractT2P(_Preprocess):
                                         **self.process_cfgs)
         
         
-class Rotate2TelCoords(_Preprocess):
-    """Trim the AxisManager to optimize for faster FFTs later in the pipeline.
-    All processing configs go to `fft_trim`
-
-    .. autofunction:: sotodlib.tod_ops.fft_trim
+class Deprojection(_Preprocess):
+    """A class to handle the deprojection process, rotating to and from telescope coordinates.
+    Attributes
+    ----------
+    name : str
+        The name of the process, set to "deprojection".
+    signal : str
+        The signal to be processed, default is 'signal'.
+    Methods
+    -------
+    process(aman, proc_aman)
+        Processes the data by rotating to and from telescope coordinates.
+        autofunction:: sotodlib.coords.demod.rotate_demodQU
+    calc_and_save(aman, proc_aman)
+        Calculates the deprojected Q and U components and saves them.
+        autofunction:: sotodlib.tod_ops.deproject.medQU_correct
+    save(proc_aman, aman)
+        Saves the processed data if save configurations are provided.
     """
-    name = "fft_trim"
+    name = "deprojection"
+
     def process(self, aman, proc_aman):
-        tod_ops.fft_trim(aman, **self.process_cfgs)
+        from sotodlib.coords import demod
+        rot_aman = demod.rotate_demodQU(aman, **self.process_cfgs)
+        if self.calc_cfgs is None:
+            # If no calculation configurations are provided, save the rotated data
+            self.save(proc_aman, rot_aman)
         
+    def calc_and_save(self, aman, proc_aman):
+        if self.calc_cfgs is None:
+            self.calc_cfgs = {}
+        if self.calc_cfgs:
+            deproj_aman = core.AxisManager(aman.dets, aman.samps)
+
+            deproj_demodQ, deproj_demodU = tod_ops.deproject.medQU_correct(aman) #, **self.calc_cfgs)
+            deproj_aman.wrap("deproj_demodQ", deproj_demodQ, [(0, 'dets'), (1, 'samps')])
+            deproj_aman.wrap("deproj_demodU", deproj_demodU, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, deproj_aman)
+        
+    def save(self, proc_aman, aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            print(proc_aman.keys())
+            proc_aman.wrap("deproj_demodQ", aman)
+            proc_aman.wrap("deproj_demodU", aman)
+
+class FocalplaneFlags(_Preprocess):
+    """Find additional detectors which have nans 
+       in their focal plane coordinates.
+
+    Saves results in proc_aman under the "fp_flags" field. 
+
+     Example config block::
+
+        - name : "fp_flags"
+          signal: "signal" # optional
+          calc: True
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.get_focalplane_flags
+    """
+    name = "fp_flags"
+
+    def calc_and_save(self, aman, proc_aman):
+        mskfp = tod_ops.flags.get_focalplane_flags(aman, merge=False)
+        
+        fp_aman = core.AxisManager(aman.dets, aman.samps)
+        fp_aman.wrap('darks', mskfp, [(0, 'dets'), (1, 'samps')])
+        self.save(proc_aman, fp_aman)
+    
+    def save(self, proc_aman, fp_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("fp_flags", dark_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        keep = ~has_all_cut(proc_aman.fp_flags.fp_flags)
+        meta.restrict("dets", meta.dets.vals[keep])
+        return meta
+
         
 
 _Preprocess.register(SubtractT2P)
@@ -1336,3 +1413,6 @@ _Preprocess.register(SSOFootprint)
 _Preprocess.register(DarkDets)
 _Preprocess.register(SourceFlags)
 _Preprocess.register(HWPAngleModel)
+# SA
+_Preprocess.register(Deprojection)
+_Preprocess.register(FocalplaneFlags)

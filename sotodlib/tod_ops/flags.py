@@ -522,6 +522,24 @@ def get_trending_flags(aman,
     return cut
 
 def get_dark_dets(aman, merge=True, overwrite=True, dark_flags_name='darks'):
+    """
+    Identify and flag dark detectors in the given aman object.
+    Parameters:
+    aman : object
+        An object containing detector information and flags.
+    merge : bool, optional
+        If True, merge the dark detector flags into the aman.flags. Default is True.
+    overwrite : bool, optional
+        If True, overwrite existing flags with the same name. Default is True.
+    dark_flags_name : str, optional
+        The name to use for the dark detector flags in aman.flags. Default is 'darks'.
+    Returns:
+    RangesMatrix
+        A matrix of ranges indicating the dark detectors.
+    Raises:
+    ValueError
+        If merge is True and dark_flags_name already exists in aman.flags and overwrite is False.
+    """
     darks = np.array(aman.det_info.wafer.type != 'OPTC')
     x = Ranges(aman.samps.count)
     mskdarks = RangesMatrix([Ranges.ones_like(x) if Y
@@ -671,3 +689,45 @@ def get_inv_var_flags(aman, signal_name='signal', nsigma=5,
             aman.flags.wrap(inv_var_flag_name, mskinvar, [(0, 'dets'), (1, 'samps')])
 
     return mskinvar
+
+def get_focalplane_flags(aman, merge=True, overwrite=True, invalid_flags_name='fp_flags'):
+    """
+    Generate flags for invalid detectors in the focal plane.
+
+    Parameters
+    ----------
+    aman : AxisManager
+        The tod.
+    merge : bool
+        If true, merges the generated flag into aman.
+    overwrite : bool
+        If true, write over flag. If false, don't.
+    invalid_flags_name : str
+        Name of flag to add to aman.flags if merge is True.
+
+    Returns
+    -------
+    msk_invalid_fp : RangesMatrix
+        RangesMatrix of invalid detectors in the focal plane.
+    """
+    # Available detectors in focalplane
+    xi_nan = np.isnan(aman.focal_plane.xi)
+    eta_nan = np.isnan(aman.focal_plane.eta)
+    x = Ranges(aman.samps.count)
+    msk_invalid_fp = RangesMatrix([
+        Ranges.ones_like(x) if Y else Ranges.zeros_like(x) 
+        for Y in flag_invalid_fp
+    ])
+    flag_valid_fp = np.sum([xi_nan, eta_nan, gamma_nan], axis=0) == 0
+    flag_invalid_fp = ~flag_valid_fp
+    msk_invalid_fp = RangesMatrix([Ranges.ones_like(x) if Y else Ranges.zeros_like(x) for Y in flag_invalid_fp])
+    
+    if merge:
+        if invalid_flags_name in aman.flags and not overwrite:
+            raise ValueError(f"Flag name {invalid_flags_name} already exists in aman.flags")
+        if invalid_flags_name in aman.flags:
+            aman.flags[invalid_flags_name] = msk_invalid_fp
+        else:
+            aman.flags.wrap(invalid_flags_name, msk_invalid_fp, [(0, 'dets'), (1, 'samps')])
+
+    return msk_invalid_fp
