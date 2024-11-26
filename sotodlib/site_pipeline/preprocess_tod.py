@@ -181,7 +181,8 @@ def preproc_or_load_group(obs_id, configs, dets, logger=None,
 
     if type(configs) == str:
         configs = yaml.safe_load(open(configs, "r"))
-
+        print(configs["context_file"])
+    
     context = core.Context(configs["context_file"])
     group_by, groups = _get_groups(obs_id, configs, context)
     all_groups = groups.copy()

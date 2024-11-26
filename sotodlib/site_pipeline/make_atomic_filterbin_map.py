@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+import sqlite3
 import numpy as np, sys, time, warnings, os, so3g, logging, yaml, itertools, multiprocessing, traceback
 from sotodlib import coords, mapmaking
 from sotodlib.core import Context,  metadata as metadata_core, FlagManager, AxisManager, OffsetAxis
