@@ -9,7 +9,7 @@ import sotodlib.coords.planets as planets
 
 from sotodlib.core.flagman import (has_any_cuts, has_all_cut,
                                    count_cuts,
-                                    sparse_to_ranges_matrix)
+                                   sparse_to_ranges_matrix)
 
 from .pcore import _Preprocess, _FracFlaggedMixIn
 from .. import flag_utils
@@ -84,7 +84,6 @@ class DetBiasFlags(_FracFlaggedMixIn, _Preprocess):
             plot_det_bias_flags(aman, proc_aman['det_bias_flags'], rfrac_range=self.calc_cfgs['rfrac_range'],
                                 psat_range=self.calc_cfgs['psat_range'], filename=filename.replace('{name}', f'{ufm}_bias_cuts_venn'))
 
-
 class Trends(_FracFlaggedMixIn, _Preprocess):
     """Calculate the trends in the data to look for unlocked detectors. All
     calculation configs go to `get_trending_flags`.
@@ -153,7 +152,6 @@ class Trends(_FracFlaggedMixIn, _Preprocess):
             det = aman.dets.vals[0]
             ufm = det.split('_')[2]
             plot_trending_flags(aman, proc_aman['trends'], filename=filename.replace('{name}', f'{ufm}_trending_flags'))
-
 
 class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
     """Run glitch detection algorithm to find glitches. All calculation configs
@@ -226,7 +224,6 @@ class GlitchDetection(_FracFlaggedMixIn, _Preprocess):
                              plot_ds_factor=self.plot_cfgs.get("plot_ds_factor", 50), filename=filename.replace('{name}', f'{ufm}_glitch_signal_diff'))
             plot_flag_stats(aman, proc_aman.glitches, flag_type='glitches', filename=filename.replace('{name}', f'{ufm}_glitch_stats'))
 
-
 class FixJumps(_Preprocess):
     """
     Repairs the jump heights given a set of jump flags and heights.
@@ -252,7 +249,6 @@ class FixJumps(_Preprocess):
         aman[self.signal] = tod_ops.jumps.jumpfix_subtract_heights(
             aman[self.signal], proc_aman[field].jump_flag.mask(),
             inplace=True, heights=proc_aman[field].jump_heights)
-
 
 class Jumps(_FracFlaggedMixIn, _Preprocess):
     """Run generic jump finding and fixing algorithm.
@@ -696,7 +692,6 @@ class Demodulate(_Preprocess):
             proc_aman.restrict('samps', (aman.samps.offset + trim,
                                          aman.samps.offset + aman.samps.count - trim))
 
-
 class EstimateAzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
@@ -999,7 +994,6 @@ class HWPAngleModel(_Preprocess):
         if self.save_cfgs:
             proc_aman.wrap("hwp_angle", hwp_angle_aman)
         
-
 class FourierFilter(_Preprocess):
     """
     Applies a fourier filter (defined in fft_ops) to the data.
@@ -1140,7 +1134,7 @@ class PCARelCal(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            proc_aman.wrap(self.run_name, pca_aman)
+            proc_aman.wrap("pca_aman", pca_aman)
 
     def select(self, meta, proc_aman=None):
         if self.select_cfgs is None:
@@ -1167,7 +1161,6 @@ class PCARelCal(_Preprocess):
                 pca_aman = aman.restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 band_aman = proc_aman[self.run_name].restrict('dets', aman.dets.vals[proc_aman[self.run_name][f'{band}_idx']], in_place=False)
                 plot_pcabounds(pca_aman, band_aman, filename=filename.replace('{name}', f'{ufm}_{band}_pca'), signal=self.signal, band=band, plot_ds_factor=self.plot_cfgs.get('plot_ds_factor', 20))
-
 
 class PTPFlags(_Preprocess):
     """Find detectors with anomalous peak-to-peak signal.
@@ -1301,7 +1294,6 @@ class SubtractT2P(_Preprocess):
         tod_ops.t2pleakage.subtract_t2p(aman, proc_aman['t2p'],
                                         **self.process_cfgs)
         
-        
 class Deprojection(_Preprocess):
     """A class to handle the deprojection process: rotating to and from telescope coordinates,
        calculating the deprojected Q and U components, and saving the processed data.
@@ -1346,10 +1338,7 @@ class Deprojection(_Preprocess):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            #print(proc_aman.keys())
             proc_aman.wrap("deproj", deproj_aman)
-            #proc_aman.wrap("deproj_demodU", deproj_aman)
-
 
 class FocalplaneFlags(_Preprocess):
     """Find additional detectors which have nans 
@@ -1402,7 +1391,6 @@ class BadSubscanFlags(_Preprocess):
           calc: True
           save: True
           select: True
-
     
     .. autofunction:: sotodlib.tod_ops.flags.get_ptp_flags
     """
@@ -1412,8 +1400,7 @@ class BadSubscanFlags(_Preprocess):
         msk_ss, msk_det = tod_ops.flags.get_badsubscan_flags(aman, **self.calc_cfgs)
         ss_aman = core.AxisManager(aman.dets, aman.samps)
         ss_aman.wrap("bad_subscan_flags", msk_ss, [(0, 'dets'), (1, 'samps')])
-        #ssdet_aman = core.AxisManager(aman.dets, aman.samps)
-        ss_aman.wrap("bad_subscan_dets", msk_ss, [(0, 'dets'), (1, 'samps')])
+        #ss_aman.wrap("bad_subscan_dets", msk_det, [(0, 'dets')])
         self.save(proc_aman, ss_aman)
     
     def save(self, proc_aman, ss_aman): #, ssdet_aman):
@@ -1421,15 +1408,16 @@ class BadSubscanFlags(_Preprocess):
             return
         if self.save_cfgs:
             proc_aman.wrap("badsubscan_flags", ss_aman)
-            #proc_aman.wrap("bad_subscan_dets", ssdet_aman)
 
     def select(self, meta, proc_aman=None):
+        #print(proc_aman.keys())
+        #print(proc_aman.dets.vals.shape)
+        #print(proc_aman.badsubscan_flags.bad_subscan_dets.shape)
         if self.select_cfgs is None:
             return meta
         if proc_aman is None:
             proc_aman = meta.preprocess
-        print(proc_aman.keys())
-        meta.restrict("dets", proc_aman.dets.vals[~proc_aman.badsubscan_flags.bad_subscan_dets])
+        #meta.restrict("dets", proc_aman.dets.vals[~proc_aman.badsubscan_flags.bad_subscan_dets])
         return meta
 
 class EstimateAzSSsubscan(_Preprocess):
@@ -1440,30 +1428,32 @@ class EstimateAzSSsubscan(_Preprocess):
     
     def calc_and_save(self, aman, proc_aman):
         calc_aman_left, calc_aman_right, model_left, model_right = tod_ops.azss.get_azss_lr(aman, **self.calc_cfgs)
-        self.save(proc_aman, calc_aman_left, "left")
-        self.save(proc_aman, calc_aman_right, "right")
-        #pol = self.calc_cfgs["signal"][-1]
-        #aman.wrap(f"azss_model_left{pol}", model_left, [(0, 'dets'), (1, 'samps')])
-        #aman.wrap(f"azss_model_right{pol}", model_right, [(0, 'dets'), (1, 'samps')])
-        #self.save(aman, calc_aman_left, "left")
-        #self.save(aman, calc_aman_right, "right")
+        self.save(proc_aman, calc_aman_left, "left", "stats")
+        self.save(proc_aman, calc_aman_right, "right", "stats")
+        self.save(proc_aman, model_left, "left", "model")
+        self.save(proc_aman, model_right, "right", "model")
     
-    def save(self, proc_aman, calc_aman, leftright):
+    def save(self, proc_aman, calc_aman, leftright, modelstats):
         if self.save_cfgs is None:
             return
         if self.save_cfgs:
-            _azss_stats_dict = {
-                f'{leftright}_{self.calc_cfgs["signal"]}': calc_aman
-                }
-            azss_stats = AxisManager(calc_aman.dets, calc_aman.bin_az_samps)
-            azss_stats.wrap('binned_az', calc_aman['binned_az'], [(0, 'bin_az_samps')])
-            for key, val in _azss_stats_dict.items():
-                azss_stats.wrap('binned_signal_'+key, val['binned_signal'], [(0, 'dets'), (1, 'bin_az_samps')])
-                azss_stats.wrap('binned_signal_sigma_'+key, val['binned_signal_sigma'], [(0, 'dets'), (1, 'bin_az_samps')])
-                azss_stats.wrap('uniform_binned_signal_sigma_'+key, val['uniform_binned_signal_sigma'], [(0, 'dets')])
-                azss_stats.wrap('binned_model_'+key, val['binned_model'], [(0, 'dets'), (1, 'bin_az_samps')])
-                azss_stats.wrap('redchi2s_'+key, val['redchi2s'], [(0, 'dets')])
-            proc_aman.wrap(self.calc_cfgs["azss_stats_name"]+"_"+leftright, azss_stats)
+            if modelstats == "stats":
+                _azss_stats_dict = {
+                    f'{leftright}_{self.calc_cfgs["signal"]}': calc_aman
+                    }
+                azss_stats = AxisManager(calc_aman.dets, calc_aman.bin_az_samps)
+                azss_stats.wrap('binned_az', calc_aman['binned_az'], [(0, 'bin_az_samps')])
+                for key, val in _azss_stats_dict.items():
+                    azss_stats.wrap('binned_signal_'+key, val['binned_signal'], [(0, 'dets'), (1, 'bin_az_samps')])
+                    azss_stats.wrap('binned_signal_sigma_'+key, val['binned_signal_sigma'], [(0, 'dets'), (1, 'bin_az_samps')])
+                    azss_stats.wrap('uniform_binned_signal_sigma_'+key, val['uniform_binned_signal_sigma'], [(0, 'dets')])
+                    azss_stats.wrap('binned_model_'+key, val['binned_model'], [(0, 'dets'), (1, 'bin_az_samps')])
+                    azss_stats.wrap('redchi2s_'+key, val['redchi2s'], [(0, 'dets')])
+                proc_aman.wrap(self.calc_cfgs["azss_stats_name"]+"_"+leftright, azss_stats)
+            elif modelstats == "model":
+                azss_model = core.AxisManager(proc_aman.dets, proc_aman.samps)
+                azss_model.wrap('azss_model', calc_aman)
+                proc_aman.wrap(self.calc_cfgs["azss_model_name"]+"_"+leftright, azss_model) #calc_aman)
 
 class SubtractAzSSsubscan(_Preprocess):
     """
@@ -1472,10 +1462,75 @@ class SubtractAzSSsubscan(_Preprocess):
     name = "subtract_azss_lr"
     
     def process(self, aman, proc_aman):
-        print(aman.keys())
-        print(proc_aman.keys())
-        tod_ops.azss.subtract_azss_lr(aman, **self.process_cfgs)    
+        tod_ops.azss.subtract_azss_lr(aman, **self.process_cfgs)
 
+class NoiseFlags(_Preprocess):
+    """Find detectors with anomalous white noise / fknee.
+
+    Saves results in proc_aman under the "wn_flags" field. 
+
+     Example config block::
+
+        - name: "wn_fk_flags"
+          calc:
+            low_wn: 5
+            high_wn: 60
+            high_fk: 6
+          save: True
+          select: True
+    
+    .. autofunction:: sotodlib.tod_ops.flags.whitenoi_fknee_cuts
+    """
+    name = "wn_fk_flags"
+    
+    def calc_and_save(self, aman, proc_aman):
+        # labelaxis
+        #print(aman.noise_fit_stats_signal.noise_model_coeffs) # 'fknee','white_no','alpha'
+        #print(aman.noise_model_coeffs) # 'fknee','white_no','alpha'
+        mskwn, mskfk = tod_ops.flags.whitenoi_fknee_cuts(aman, **self.calc_cfgs)
+        calc_aman = core.AxisManager(aman.dets, aman.samps)
+        calc_aman.wrap('wn_flags', mskwn)
+        calc_aman.wrap('fknee_flags', mskfk)
+        self.save(proc_aman, calc_aman)
+    
+    def save(self, proc_aman, calc_aman):
+        if self.save_cfgs is None:
+            return
+        if self.save_cfgs:
+            proc_aman.wrap("noise_flags", calc_aman)
+    
+    def select(self, meta, proc_aman=None):
+        if self.select_cfgs is None:
+            return meta
+        if proc_aman is None:
+            proc_aman = meta.preprocess
+        if "wn_flags" in proc_aman:
+            meta.restrict('dets', proc_aman.dets.vals[proc_aman.noise_flags.wn_flags])
+        if "fknee_flags" in proc_aman:
+            meta.restrict('dets', proc_aman.dets.vals[proc_aman.noise_flags.fknee_flags])
+        return meta
+    
+class PointingModel(_Preprocess):
+    """Apply pointing model to the TOD.
+
+    Saves results in proc_aman under the "pointing" field. 
+
+     Example config block::
+
+        - name : "pointing_model"
+          process: True
+          calc:
+            on_sign_ambiguous: 'fail'
+          save: True
+          
+    .. autofunction:: sotodlib.hwp.hwp_angle_model.apply_hwp_angle_model
+    """
+    name = "pointing_model"
+    
+    def calc_and_save(self, aman, proc_aman):
+        from sotodlib.coords import pointing_model
+        if self.calc_cfgs:
+            pointing_model.apply_pointing_model(aman)
 
 
 _Preprocess.register(SubtractT2P)
@@ -1511,3 +1566,5 @@ _Preprocess.register(FocalplaneFlags) # SA
 _Preprocess.register(BadSubscanFlags) # SA
 _Preprocess.register(EstimateAzSSsubscan) # SA
 _Preprocess.register(SubtractAzSSsubscan) # SA
+_Preprocess.register(NoiseFlags) # SA
+_Preprocess.register(PointingModel) # SA

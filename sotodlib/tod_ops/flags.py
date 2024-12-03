@@ -829,3 +829,48 @@ def get_badsubscan_flags(aman, nstd_threshold=3.0, Tptp_pW_threshold=0.5, kurt_t
         aman.flags.wrap(name, badsubscan_flags)
 
     return badsubscan_flags, baddetector_flags
+
+
+def whitenoi_fknee_cuts(aman, low_wn, high_wn, high_fk):
+    """
+    Evaluate white noise and fknee cuts based on provided boundaries.
+
+    Parameters:
+    aman : object
+        An object containing noise fit statistics and noise model coefficients.
+    low_wn : float or None
+        The lower boundary for white noise. If None, white noise flagging is skipped.
+    high_wn : float or None
+        The upper boundary for white noise. If None, white noise flagging is skipped.
+    high_fk : float or None
+        The upper boundary for fknee. If None, fknee flagging is skipped.
+
+    Returns:
+    tuple or None
+        A tuple containing flags for valid white noise and fknee if both boundaries are provided.
+        If only one boundary is provided, returns the corresponding flag.
+        If no boundaries are provided, returns None.
+    """
+    # [dets,noise_model_coeffs]
+    # where noise_model_coeffs.vals = [fknee, white_noise, alpha], labelaxis
+    noise = aman.noise_fit_stats_signal.fit # #
+    fk = noise[:, 0]
+    wn = noise[:, 1]
+    if low_wn is None:
+        print(f"white noise boundaries are not defined, skipping.")
+        flag_valid_wn = None
+    else:
+        flag_valid_wn = (low_wn < wn * 1e6) & (wn * 1e6 < high_wn)
+    if high_fk is None:
+        print(f"fknee boundaries are not defined, skipping.")
+        flag_valid_fk = None
+    else:
+        flag_valid_fk = fk < high_fk
+    if low_wn is not None and high_fk is not None:
+        return flag_valid_wn, flag_valid_fk
+    elif low_wn is not None:
+        return flag_valid_wn
+    elif high_fk is not None:
+        return flag_valid_fk
+    else:
+        return None
