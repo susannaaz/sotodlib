@@ -382,6 +382,7 @@ def get_model_sig_tod(aman, azss_stats, az=None):
 
             if _azss_stats.method == 'interpolate':
                 good_az = np.logical_and(_azss_stats.binned_az >= np.min(az), _azss_stats.binned_az <= np.max(az))
+                good_az = np.logical_and(good_az, ~np.any(np.isnan(azss_stats.binned_signal), axis=0)) #SA: align with 1c7c010
                 f_template = interp1d(_azss_stats.binned_az[good_az],
                                       _azss_stats.binned_signal[:, good_az], fill_value='extrapolate')
                 _model = f_template(az)
@@ -403,6 +404,7 @@ def get_model_sig_tod(aman, azss_stats, az=None):
                                          fit_range=frange)
         if azss_stats.method == 'interpolate':
             good_az = np.logical_and(azss_stats.binned_az >= np.min(az), azss_stats.binned_az <= np.max(az))
+            good_az = np.logical_and(good_az, ~np.any(np.isnan(azss_stats.binned_signal), axis=0)) #SA: align with 1c7c010
             f_template = interp1d(azss_stats.binned_az[good_az], azss_stats.binned_signal[:, good_az], fill_value='extrapolate')
             model = f_template(az)
             model[~np.isfinite(model[ii])] = 0
