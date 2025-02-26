@@ -456,11 +456,13 @@ def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
     """
     Write maps from data into files
     """
+    output_infos = []
     Nsplits = len(split_labels)
     for n_split in range(Nsplits):
         if np.all(data.wmap[n_split] == 0.0):
             if atomic_db is not None:
-                atomic_db_aux(atomic_db, info[n_split], valid=False)
+                output_infos.append((info[n_split], False))
+                # atomic_db_aux(atomic_db, info[n_split], valid=False)
             continue
         data.signal.write(prefix, "%s_wmap"%split_labels[n_split],
                           data.wmap[n_split])
@@ -469,7 +471,9 @@ def write_demod_maps(prefix, data, info, split_labels=None, atomic_db=None):
         data.signal.write(prefix, "%s_hits"%split_labels[n_split],
                           data.signal.hits[n_split])
         if atomic_db is not None:
-            atomic_db_aux(atomic_db, info[n_split], valid=True)
+            output_infos.append((info[n_split], True))
+            # atomic_db_aux(atomic_db, info[n_split], valid=True)
+    return output_infos
 
 def make_demod_map(context, obslist, noise_model, info,
                     preprocess_config, prefix, shape=None, wcs=None,
@@ -585,7 +589,7 @@ def make_demod_map(context, obslist, noise_model, info,
     nobs_kept = comm.allreduce(nobs_kept)
     # if we skip all the obs then we return error and output
     if nobs_kept == 0:
-        return errors, outputs
+        return errors, outputs, []
 
     for signal in mapmaker.signals:
         signal.prepare()
@@ -602,9 +606,8 @@ def make_demod_map(context, obslist, noise_model, info,
     info = add_weights_to_info(info, weights, split_labels)
 
     # output to files
-    write_demod_maps(prefix, mapdata, info, split_labels=split_labels, atomic_db=atomic_db)
-
-    return errors, outputs
+    last_infos = write_demod_maps(prefix, mapdata, info, split_labels=split_labels, atomic_db=atomic_db)
+    return errors, outputs, last_infos
 
 def add_weights_to_info(info, weights, split_labels):
     Nsplits = len(split_labels)

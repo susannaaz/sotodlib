@@ -404,7 +404,7 @@ def main(
 
         tag = "%5d/%d" % (oi+1, len(obskeys))
         putils.mkdir(os.path.dirname(prefix))
-        pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
+        #pwv_atomic = get_pwv(periods[pid, 0], periods[pid, 1], args.hk_data_path)
 
         # Save file for data base of atomic maps.
         # We will write an individual file,
@@ -425,16 +425,17 @@ def main(
                 info.prefix_path = str(prefix + '_%s' % split_label)
                 info.elevation = obs_infos[obslist[0][3]].el_center
                 info.azimuth = obs_infos[obslist[0][3]].az_center
-                info.pwv = float(pwv_atomic)
+                #info.pwv = float(pwv_atomic)
                 info.roll_angle = obs_infos[obslist[0][3]].roll_center
-                info.sun_distance = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
+                #info.sun_distance = get_sun_distance(args.site, int(t), obs_infos[obslist[0][3]].az_center, obs_infos[obslist[0][3]].el_center)
                 info_list.append(info)
         # inputs that are unique per atomic map go into run_list
         if args.area is not None:
             run_list.append([obslist, shape, wcs, info_list, prefix, t])
         elif args.nside is not None:
             run_list.append([obslist, None, None, info_list, prefix, t])
-
+    
+    L.info(f"Submitting {len(run_list)} futures")
     
     futures = [executor.submit(
             mapmaking.make_demod_map, args.context, r[0],
@@ -451,18 +452,29 @@ def main(
             site=args.site,
             atomic_db=args.atomic_db) for r in run_list]
 
+    L.info(f'All futures submitted {len(futures)}')
     for future in as_completed_callable(futures):
         L.info('New future as_completed result')
         try:
-            errors, outputs = future.result()
+            # res = future.result()
+            # L.info(f'Future result: {res}')
+            # return True
+            errors, outputs, infos = future.result()
         except Exception as e:
+            infos = []
             future_write_to_log(e, errlog)
             continue
         futures.remove(future)
+        L.info(f'Removing future from list, {len(futures)} left')
+        L.info(f'Writing to atomic database with {len(infos)}')
+        for info in infos:
+            mapmaking.demod_mapmaker.atomic_db_aux(args.atomic_db, info[0], info[1])
+        L.info(f'Cleanup for errrors and outputs with {len(errors)} and {len(outputs)}')
         for ii in range(len(errors)):
             for idx_prepoc in range(len(preprocess_config)):
                 if isinstance(outputs[ii][idx_prepoc], dict):
                     preprocess_util.cleanup_mandb(errors[ii], outputs[ii][idx_prepoc], preprocess_config[idx_prepoc], L)
+    L.info('All futures completed')
     L.info("Done")
     return True
 
