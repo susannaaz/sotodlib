@@ -108,8 +108,6 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
 
     Returns
     -------
-    azss_stats: AxisManager
-        Returns updated azss_stats with added fit information
     model_sig_tod: array-like
         Model fit for each detector size ndets x n_samps
     """
@@ -117,31 +115,30 @@ def fit_azss(az, azss_stats, max_mode, fit_range=None):
     m = ~np.isnan(azss_stats.binned_signal[0]) # masks bins without counts
     if np.count_nonzero(m) < max_mode + 1:
         raise ValueError('Number of valid bins is smaller than mode of Legendre function')
-    
+
     if fit_range==None:
-        az_min = np.min(azss_stats.binned_az[m]) - bin_width/2
-        az_max = np.max(azss_stats.binned_az[m]) + bin_width/2
+        az_min = np.min(azss_stats.binned_az[m]) - bin_width / 2
+        az_max = np.max(azss_stats.binned_az[m]) + bin_width / 2
     else:
         az_min, az_max = fit_range[0], fit_range[1]
-    
-    x_legendre = ( 2*az - (az_min+az_max) ) / (az_max - az_min)
-    x_legendre_bin_centers = ( 2*azss_stats.binned_az - (az_min+az_max) ) / (az_max - az_min)
+
+    x_legendre = (2 * az - (az_min+az_max)) / (az_max - az_min)
+    x_legendre_bin_centers = (2 * azss_stats.binned_az - (az_min+az_max)) / (az_max - az_min)
     x_legendre_bin_centers = np.where(~m, np.nan, x_legendre_bin_centers)
-    
-    mode_names = []
-    for mode in range(max_mode+1):
-        mode_names.append(f'legendre{mode}')
-    
+
     coeffs = L.legfit(x_legendre_bin_centers[m], azss_stats.binned_signal[:, m].T, max_mode)
     coeffs = coeffs.T
     binned_model = L.legval(x_legendre_bin_centers, coeffs.T)
     binned_model = np.where(~m, np.nan, binned_model)
-    sum_of_squares = np.sum(((azss_stats.binned_signal[:, m] - binned_model[:,m])**2), axis=-1)
-    redchi2s = sum_of_squares/azss_stats.uniform_binned_signal_sigma**2 / ( len(x_legendre_bin_centers[m]) - max_mode - 1)
-    
+    sum_of_squares = np.sum(((azss_stats.binned_signal[:, m] - binned_model[:, m])**2), axis=-1)
+    redchi2s = sum_of_squares/azss_stats.uniform_binned_signal_sigma**2 / (len(x_legendre_bin_centers[m]) - max_mode - 1)
+
+    mode_names = np.array([f'legendre{mode}' for mode in range(max_mode + 1)], dtype='<U10')
+    modes_axis = core.LabelAxis(name='azss_modes', vals=mode_names)
+    azss_stats.add_axis(modes_axis)
     azss_stats.wrap('binned_model', binned_model, [(0, 'dets'), (1, 'bin_az_samps')])
     azss_stats.wrap('x_legendre_bin_centers', x_legendre_bin_centers, [(0, 'bin_az_samps')])
-    azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, core.LabelAxis(name='modes', vals=np.array(mode_names, dtype='<U10')))])
+    azss_stats.wrap('coeffs', coeffs, [(0, 'dets'), (1, 'azss_modes')])
     azss_stats.wrap('redchi2s', redchi2s, [(0, 'dets')])
     
     return azss_stats, L.legval(x_legendre, coeffs.T)
@@ -204,6 +201,12 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
     flags : RangesMatrix, optional
         Flag indicating whether to exclude flagged samples when binning the signal.
         Default is no mask applied.
+    scan_flags : str or Ranges, optional
+        Subtract in the scan/time region specified by flags.
+        Typically `flags.left_scan` or `flags.right_scan` will be used.
+        If we estimate and subtract azss in left going scan only, then
+        `flags` should be a "union of glitch_flags and flags.right_scan (or ~flags.left_scan)", and
+        `scan_flags` should be `flags.left_scan`.
     apodize_edges : bool, optional
         If True, applies an apodization window to the edges of the signal. Defaults to True.
     apodize_edges_samps : int, optional
@@ -255,7 +258,7 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
     prefilt = filters.get_hpf(prefilt_cfg)
 
     if signal is None:
-        #signal_name variable to be deleted when tod_ops.fourier_filter is updated
+        # signal_name variable to be deleted when tod_ops.fourier_filter is updated
         signal_name = 'signal'
         signal = aman[signal_name]
     elif isinstance(signal, str):
@@ -265,6 +268,13 @@ def get_azss(aman, signal='signal', az=None, frange=None, bins=100, flags=None,
         raise TypeError("Currently ndarray not supported, need update to tod_ops.fourier_filter module to remove signal_name argument.")
     else:
         raise TypeError("Signal must be None, str, or ndarray")
+
+    if scan_flags is None:
+        scan_flags = np.ones(aman.samps.count, dtype=bool)
+    elif isinstance(scan_flags, str):
+        scan_flags = aman.flags.get(scan_flags).mask()
+    else:
+        scan_flags = scan_flags.mask()
 
     if apply_prefilt:
         # This requires signal to be a string.

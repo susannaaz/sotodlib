@@ -816,7 +816,8 @@ class AzSS(_Preprocess):
     """Estimates Azimuth Synchronous Signal (AzSS) by binning signal by azimuth of boresight.
     All process confgis go to `get_azss`. If `method` is 'interpolate', no fitting applied 
     and binned signal is directly used as AzSS model. If `method` is 'fit', Legendre polynominal
-    fitting will be applied and used as AzSS model.
+    fitting will be applied and used as AzSS model. If `subtract_in_place` is True, subtract AzSS model
+    from signal in place.
 
     Example configuration block::
 
@@ -889,6 +890,24 @@ class AzSS(_Preprocess):
                                     merge_stats=True, merge_model=False,
                                     subtract_in_place=self.process_cfgs["subtract"], 
                                     **self.calc_cfgs)
+
+    def process(self, aman, proc_aman, sim=False):
+        if self.calc_cfgs.get('azss_stats_name') in proc_aman and self.process_cfgs["subtract"]:
+            if sim:
+                tod_ops.azss.get_azss(aman, **self.calc_cfgs)
+            else:
+                tod_ops.azss.subtract_azss(
+                    aman,
+                    proc_aman.get(self.calc_cfgs.get('azss_stats_name')),
+                    signal=self.calc_cfgs.get('signal', 'signal'),
+                    scan_flags=self.calc_cfgs.get('scan_flags'),
+                    method=self.calc_cfgs.get('method', 'interpolate'),
+                    max_mode=self.calc_cfgs.get('max_mode'),
+                    range=self.calc_cfgs.get('range'),
+                    in_place=True
+                )
+        else:
+            tod_ops.azss.get_azss(aman, **self.calc_cfgs)
 
 class GlitchFill(_Preprocess):
     """Fill glitches. All process configs go to `fill_glitches`.
